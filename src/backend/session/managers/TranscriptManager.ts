@@ -20,9 +20,14 @@ import {
   type AgentProvider,
   type UnifiedMessage,
 } from "../../services/llm";
-import { getUserState, getOrCreateUserState, updateTranscriptionBatchEndOfDay } from "../../services/userState.service";
+import {
+  getUserState,
+  createUserState,
+  updateTranscriptionBatchEndOfDay,
+} from "../../services/userState.service";
 import { TimeManager } from "./TimeManager";
 import type { FileManager } from "./FileManager";
+import { get } from "http";
 
 // =============================================================================
 // Types
@@ -76,7 +81,7 @@ export class TranscriptManager extends SyncedManager {
   private lastSummarySegmentCount: number = 0;
   private userStateInitialized = false;
   private timeManager: TimeManager | null = null;
-  private transcriptionBatchEndOfDay: string | null = null;
+  private transcriptionBatchEndOfDay: Date | null = null;
 
   // ===========================================================================
   // Private Helpers
@@ -91,7 +96,10 @@ export class TranscriptManager extends SyncedManager {
 
   private getTimeManager(): TimeManager {
     if (!this.timeManager) {
-      const timezone = (this._session as any)?.settings?.timezone ?? undefined;
+      const timezone = (this._session as any).appSession?.settings?.getMentraOS(
+        "userTimezone",
+      ) as string | undefined;
+
       this.timeManager = new TimeManager(timezone);
     }
     return this.timeManager;
@@ -110,12 +118,15 @@ export class TranscriptManager extends SyncedManager {
     if (!userId) return;
 
     try {
-      const today = this.getTimeManager().getTodayDate();
+      const today = this.getTimeManager().today();
       this.loadedDate = today;
 
       // Load available dates from MongoDB
       const mongoDbDates = await getAvailableDates(userId);
-      console.log(`[TranscriptManager] MongoDB dates for ${userId}:`, mongoDbDates);
+      console.log(
+        `[TranscriptManager] MongoDB dates for ${userId}:`,
+        mongoDbDates,
+      );
 
       // Load available dates from R2 via R2Manager
       const r2Manager = (this._session as any)?.r2;
@@ -133,10 +144,16 @@ export class TranscriptManager extends SyncedManager {
       console.log(`[TranscriptManager] All available dates:`, allDates);
       this.availableDates.set(allDates);
 
-      console.log(`[TranscriptManager] ========================================`);
-      console.log(`[TranscriptManager] FETCHING transcripts from MongoDB (TODAY)`);
+      console.log(
+        `[TranscriptManager] ========================================`,
+      );
+      console.log(
+        `[TranscriptManager] FETCHING transcripts from MongoDB (TODAY)`,
+      );
       console.log(`[TranscriptManager] Date: ${today}`);
-      console.log(`[TranscriptManager] ========================================`);
+      console.log(
+        `[TranscriptManager] ========================================`,
+      );
 
       const transcript = await getOrCreateDailyTranscript(userId, today);
 
@@ -158,9 +175,13 @@ export class TranscriptManager extends SyncedManager {
         this.segments.set(loadedSegments);
         this.segmentIndex = loadedSegments.length;
 
-        console.log(`[TranscriptManager] ✓ MongoDB fetch successful: ${loadedSegments.length} segments for ${today}`);
+        console.log(
+          `[TranscriptManager] ✓ MongoDB fetch successful: ${loadedSegments.length} segments for ${today}`,
+        );
       } else {
-        console.log(`[TranscriptManager] ✓ MongoDB fetch successful: 0 segments for ${today}`);
+        console.log(
+          `[TranscriptManager] ✓ MongoDB fetch successful: 0 segments for ${today}`,
+        );
       }
 
       // Load saved hour summaries
@@ -180,10 +201,15 @@ export class TranscriptManager extends SyncedManager {
       }
 
       // Load or create transcriptionBatchEndOfDay from MongoDB
-      const defaultEndOfDay = new Date(this.getTimeManager().getEndOfDayUTC());
-      console.log(`[TranscriptManager] Ensuring UserState exists for ${userId}, default EOD: ${defaultEndOfDay.toISOString()}`);
-      const userState = await getOrCreateUserState(userId, defaultEndOfDay);
-      this.transcriptionBatchEndOfDay = userState.transcriptionBatchEndOfDay.toISOString();
+      const defaultEndOfDay = new Date(this.getTimeManager().endOfDay());
+      this.transcriptionBatchEndOfDay = new Date(
+        this.getTimeManager().endOfDay(),
+      );
+      console.log(
+        `[TranscriptManager] Ensuring UserState exists for ${userId}, default EOD: ${defaultEndOfDay.toISOString()}`,
+      );
+      await createUserState(userId, defaultEndOfDay);
+
       this.userStateInitialized = true;
       console.log(
         `[TranscriptManager] Loaded batch end of day from DB: ${this.transcriptionBatchEndOfDay}`,
@@ -202,7 +228,7 @@ export class TranscriptManager extends SyncedManager {
     if (!userId) return;
 
     try {
-      const today = this.getTimeManager().getTodayDate();
+      const today = this.getTimeManager().today();
       const toSave = [...this.pendingSegments];
       this.pendingSegments = [];
 
@@ -252,12 +278,12 @@ export class TranscriptManager extends SyncedManager {
   private async updateRollingSummary(): Promise<void> {
     const now = new Date();
     const timeManager = this.getTimeManager();
-    const currentHour = timeManager.getCurrentHour();
-    const today = timeManager.getTodayDate();
+    const currentHour = timeManager.currentHour();
+    const today = timeManager.today();
 
     const hourSegments = this.segments.filter((seg) => {
-      const segHour = timeManager.getHourFromTimestamp(seg.timestamp);
-      const segDateStr = timeManager.getDateString(new Date(seg.timestamp));
+      const segHour = timeManager.hourFrom(seg.timestamp);
+      const segDateStr = timeManager.toDateString(new Date(seg.timestamp));
       return segDateStr === today && segHour === currentHour;
     });
 
@@ -267,7 +293,7 @@ export class TranscriptManager extends SyncedManager {
 
     if (hourSegments.length === 0) {
       if (hourChanged) {
-        this.currentHourSummary = `${timeManager.formatHourLabel(currentHour)} - Waiting for activity...`;
+        this.currentHourSummary = `${timeManager.formatHour(currentHour)} - Waiting for activity...`;
         this.lastSummaryHour = currentHour;
         this.lastSummarySegmentCount = 0;
       }
@@ -288,7 +314,7 @@ export class TranscriptManager extends SyncedManager {
         "[TranscriptManager] Failed to update rolling summary:",
         error,
       );
-      this.currentHourSummary = `${timeManager.formatHourLabel(currentHour)} - ${hourSegments.length} segments recorded`;
+      this.currentHourSummary = `${timeManager.formatHour(currentHour)} - ${hourSegments.length} segments recorded`;
     }
   }
 
@@ -297,8 +323,8 @@ export class TranscriptManager extends SyncedManager {
       return this.currentHourSummary;
     }
     const timeManager = this.getTimeManager();
-    const hour = timeManager.getCurrentHour();
-    return `${timeManager.formatHourLabel(hour)} - Starting...`;
+    const hour = timeManager.currentHour();
+    return `${timeManager.formatHour(hour)} - Starting...`;
   }
 
   // ===========================================================================
@@ -341,7 +367,7 @@ export class TranscriptManager extends SyncedManager {
     if (!wasRecording) {
       const fileManager = this.getFileManager();
       if (fileManager) {
-        const today = this.getTimeManager().getTodayDate();
+        const today = this.getTimeManager().today();
         fileManager.onTranscriptStarted(today);
       }
     }
@@ -356,7 +382,12 @@ export class TranscriptManager extends SyncedManager {
     this.scheduleSave();
   }
 
-  async addPhotoSegment(photoUrl: string, mimeType: string, timezone?: string, description?: string): Promise<void> {
+  async addPhotoSegment(
+    photoUrl: string,
+    mimeType: string,
+    timezone?: string,
+    description?: string,
+  ): Promise<void> {
     this.segmentIndex++;
 
     const segment: TranscriptSegment = {
@@ -415,16 +446,24 @@ export class TranscriptManager extends SyncedManager {
       return { segments: [], hourSummaries: [] };
     }
 
-    const today = this.getTimeManager().getTodayDate();
-    console.log(`[TranscriptManager] loadDateTranscript(${date}) - today is ${today}`);
+    const today = this.getTimeManager().today();
+    console.log(
+      `[TranscriptManager] loadDateTranscript(${date}) - today is ${today}`,
+    );
 
     // TODAY: Return current in-memory segments (originally loaded from MongoDB during hydrate)
     if (date === today) {
-      console.log(`[TranscriptManager] ========================================`);
-      console.log(`[TranscriptManager] FETCHING transcripts from MongoDB (TODAY)`);
+      console.log(
+        `[TranscriptManager] ========================================`,
+      );
+      console.log(
+        `[TranscriptManager] FETCHING transcripts from MongoDB (TODAY)`,
+      );
       console.log(`[TranscriptManager] Date: ${date}`);
       console.log(`[TranscriptManager] Segments: ${this.segments.length}`);
-      console.log(`[TranscriptManager] ========================================`);
+      console.log(
+        `[TranscriptManager] ========================================`,
+      );
       this.loadedDate = today;
       return {
         segments: [...this.segments],
@@ -434,7 +473,9 @@ export class TranscriptManager extends SyncedManager {
 
     // PAST DATE: Fetch from R2 (old transcripts are migrated there)
     console.log(`[TranscriptManager] ========================================`);
-    console.log(`[TranscriptManager] FETCHING transcripts from R2 (HISTORICAL)`);
+    console.log(
+      `[TranscriptManager] FETCHING transcripts from R2 (HISTORICAL)`,
+    );
     console.log(`[TranscriptManager] Date: ${date}`);
     console.log(`[TranscriptManager] ========================================`);
     this.isLoadingHistory = true;
@@ -474,10 +515,15 @@ export class TranscriptManager extends SyncedManager {
                 createdAt: s.createdAt,
                 updatedAt: s.updatedAt,
               }));
-              console.log(`[TranscriptManager] ✓ Loaded ${loadedSummaries.length} hour summaries from MongoDB for ${date}`);
+              console.log(
+                `[TranscriptManager] ✓ Loaded ${loadedSummaries.length} hour summaries from MongoDB for ${date}`,
+              );
             }
           } catch (err) {
-            console.error(`[TranscriptManager] Failed to load hour summaries from MongoDB for ${date}:`, err);
+            console.error(
+              `[TranscriptManager] Failed to load hour summaries from MongoDB for ${date}:`,
+              err,
+            );
           }
 
           this.segments.set(loadedSegments);
@@ -485,7 +531,9 @@ export class TranscriptManager extends SyncedManager {
           this.hourSummaries.set(loadedSummaries);
           this.isLoadingHistory = false;
 
-          console.log(`[TranscriptManager] ✓ R2 fetch successful: ${loadedSegments.length} segments for ${date}`);
+          console.log(
+            `[TranscriptManager] ✓ R2 fetch successful: ${loadedSegments.length} segments for ${date}`,
+          );
 
           return {
             segments: loadedSegments,
@@ -518,17 +566,25 @@ export class TranscriptManager extends SyncedManager {
 
   @rpc
   async loadTodayTranscript(): Promise<void> {
-    const today = this.getTimeManager().getTodayDate();
+    const today = this.getTimeManager().today();
     if (this.loadedDate === today) {
-      console.log(`[TranscriptManager] ========================================`);
-      console.log(`[TranscriptManager] FETCHING transcripts from MongoDB (TODAY)`);
+      console.log(
+        `[TranscriptManager] ========================================`,
+      );
+      console.log(
+        `[TranscriptManager] FETCHING transcripts from MongoDB (TODAY)`,
+      );
       console.log(`[TranscriptManager] Date: ${today} (already loaded)`);
       console.log(`[TranscriptManager] Segments: ${this.segments.length}`);
-      console.log(`[TranscriptManager] ========================================`);
+      console.log(
+        `[TranscriptManager] ========================================`,
+      );
       return;
     }
     console.log(`[TranscriptManager] ========================================`);
-    console.log(`[TranscriptManager] FETCHING transcripts from MongoDB (TODAY)`);
+    console.log(
+      `[TranscriptManager] FETCHING transcripts from MongoDB (TODAY)`,
+    );
     console.log(`[TranscriptManager] Date: ${today} (re-hydrating)`);
     console.log(`[TranscriptManager] ========================================`);
     await this.hydrate();
@@ -558,12 +614,12 @@ export class TranscriptManager extends SyncedManager {
   @rpc
   async generateHourSummary(hour?: number): Promise<HourSummary> {
     const timeManager = this.getTimeManager();
-    const targetHour = hour ?? timeManager.getCurrentHour();
-    const targetDate = this.loadedDate || timeManager.getTodayDate();
+    const targetHour = hour ?? timeManager.currentHour();
+    const targetDate = this.loadedDate || timeManager.today();
 
     const hourSegments = this.segments.filter((seg) => {
-      const segHour = timeManager.getHourFromTimestamp(seg.timestamp);
-      const segDateStr = timeManager.getDateString(new Date(seg.timestamp));
+      const segHour = timeManager.hourFrom(seg.timestamp);
+      const segDateStr = timeManager.toDateString(new Date(seg.timestamp));
       return segDateStr === targetDate && segHour === targetHour;
     });
 
@@ -572,7 +628,7 @@ export class TranscriptManager extends SyncedManager {
         id: `summary_${targetDate}_${targetHour}`,
         date: targetDate,
         hour: targetHour,
-        hourLabel: timeManager.formatHourLabel(targetHour),
+        hourLabel: timeManager.formatHour(targetHour),
         summary: "No activity recorded during this hour.",
         segmentCount: 0,
         createdAt: new Date(),
@@ -621,7 +677,7 @@ RULES:
         id: `summary_${targetDate}_${targetHour}`,
         date: targetDate,
         hour: targetHour,
-        hourLabel: timeManager.formatHourLabel(targetHour),
+        hourLabel: timeManager.formatHour(targetHour),
         summary: responseText,
         segmentCount: hourSegments.length,
         createdAt: new Date(),
@@ -689,8 +745,9 @@ RULES:
         return;
       }
 
+      const cutoffISO = cutoffTimestamp.toISOString();
       console.log(
-        `[setBatchDate] Batch cutoff crossed, uploading transcripts up to ${cutoffTimestamp}`,
+        `[setBatchDate] Batch cutoff crossed, uploading transcripts up to ${cutoffISO}`,
       );
 
       // Trigger R2 upload via CloudflareR2Manager
@@ -698,20 +755,24 @@ RULES:
       if (r2Manager) {
         const batchResult = await r2Manager.triggerBatch(
           userId,
-          cutoffTimestamp,
+          cutoffISO,
           timezone,
         );
 
         if (batchResult.success) {
           // Delete processed segments from MongoDB (pass timezone for date-based cleanup)
-          const deletedCount = await r2Manager.cleanupProcessedSegments(cutoffTimestamp, timezone);
+          const deletedCount = await r2Manager.cleanupProcessedSegments(
+            cutoffISO,
+            timezone,
+          );
           console.log(
             `[setBatchDate] Cleaned up ${deletedCount} segments from MongoDB`,
           );
 
           // Update batch cutoff on success
-          const newEndOfDay = timeManager.getEndOfDayUTC();
-          await updateTranscriptionBatchEndOfDay(userId, new Date(newEndOfDay));
+          const newEndOfDay = new Date(this.getTimeManager().endOfDay());
+
+          await updateTranscriptionBatchEndOfDay(userId, newEndOfDay);
           console.log(
             `[setBatchDate] R2 batch successful, updated cutoff: ${newEndOfDay}`,
           );
@@ -726,8 +787,8 @@ RULES:
         console.warn(
           `[setBatchDate] No R2Manager available, skipping R2 upload`,
         );
-        const newEndOfDay = timeManager.getEndOfDayUTC();
-        await updateTranscriptionBatchEndOfDay(userId, new Date(newEndOfDay));
+        const newEndOfDay = new Date(this.getTimeManager().endOfDay());
+        await updateTranscriptionBatchEndOfDay(userId, newEndOfDay);
       }
     }
   }
@@ -751,18 +812,24 @@ RULES:
       return false;
     }
 
-    const batchEndOfDay = userState.transcriptionBatchEndOfDay.toISOString();
+    const batchEndOfDay = userState.transcriptionBatchEndOfDay;
     this.transcriptionBatchEndOfDay = batchEndOfDay; // Update local cache
 
     const timeManager = this.getTimeManager();
-    const currentUTC = timeManager.getCurrentTimestamp();
-    console.log(`[checkBatchDate] Current UTC: ${currentUTC} | Batch End: ${batchEndOfDay}`);
+    const currentUTC = timeManager.now();
+    console.log(
+      `[checkBatchDate] Current UTC: ${currentUTC} | Batch End: ${batchEndOfDay.toISOString()}`,
+    );
 
-    if (currentUTC > batchEndOfDay) {
-      console.log("[checkBatchDate] PASSED - Current UTC time has passed batch end of day");
+    if (currentUTC > batchEndOfDay.toISOString()) {
+      console.log(
+        "[checkBatchDate] PASSED - Current UTC time has passed batch end of day",
+      );
       return true;
     } else {
-      console.log("[checkBatchDate] NOT PASSED - Current UTC time has NOT passed batch end of day");
+      console.log(
+        "[checkBatchDate] NOT PASSED - Current UTC time has NOT passed batch end of day",
+      );
       return false;
     }
   }

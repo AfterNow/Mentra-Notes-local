@@ -124,7 +124,7 @@ export class FileManager extends SyncedManager {
       console.log(`[FileManager] MongoDB DailyTranscript dates (${mongoDbDates.length}):`, mongoDbDates);
 
       // Step 4: Always include today's date (so File record exists for current day)
-      const today = this.getTodayDate();
+      const today = this.today();
       console.log(`[FileManager] Today's date: ${today}`);
 
       // Step 5: Find dates that need File records created
@@ -214,8 +214,8 @@ export class FileManager extends SyncedManager {
     return this._timeManager;
   }
 
-  private getTodayDate(): string {
-    return this.getTimeManager().getTodayDate();
+  private today(): string {
+    return this.getTimeManager().today();
   }
 
   private toFileData(file: FileI): FileData {
@@ -268,7 +268,7 @@ export class FileManager extends SyncedManager {
     const userId = this._session?.userId;
     if (!userId) return false;
 
-    const today = this.getTodayDate();
+    const today = this.today();
 
     // Check if date has changed since last check
     if (this._lastKnownToday === today) {

@@ -111,7 +111,7 @@ export class ChatManager extends SyncedManager {
     if (!userId) return;
 
     try {
-      const today = this.getTimeManager().getTodayDate();
+      const today = this.getTimeManager().today();
       await this.loadDateChat(today);
     } catch (error) {
       console.error("[ChatManager] Failed to hydrate:", error);
@@ -174,7 +174,7 @@ export class ChatManager extends SyncedManager {
   @rpc
   async sendMessage(content: string): Promise<ChatMessage> {
     const userId = this._session?.userId;
-    const currentDate = this.loadedDate || this.getTimeManager().getTodayDate();
+    const currentDate = this.loadedDate || this.getTimeManager().today();
 
     // Add user message
     const userMessage: ChatMessage = {
@@ -323,7 +323,7 @@ If you don't have enough context to answer a question, say so and ask for clarif
   @rpc
   async clearHistory(): Promise<void> {
     const userId = this._session?.userId;
-    const currentDate = this.loadedDate || this.getTimeManager().getTodayDate();
+    const currentDate = this.loadedDate || this.getTimeManager().today();
 
     this.messages.set([]);
 

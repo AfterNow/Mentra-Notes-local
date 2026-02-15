@@ -10,7 +10,7 @@ import { UserState, type UserStateI } from "../models/userState.model";
  * Get or create user state
  * If user doesn't exist, creates a new record with the provided batch end time
  */
-export async function getOrCreateUserState(
+export async function createUserState(
   userEmail: string,
   transcriptionBatchEndOfDay: Date
 ): Promise<UserStateI> {
@@ -21,6 +21,9 @@ export async function getOrCreateUserState(
       userEmail,
       transcriptionBatchEndOfDay,
     });
+    console.log( `[UserStateService] Created new UserState for ${userEmail} with EOD: ${transcriptionBatchEndOfDay.toISOString()}` );
+  } else {
+    console.log( `[UserStateService] Found existing UserState for ${userEmail} with EOD: ${userState.transcriptionBatchEndOfDay.toISOString()}` );
   }
 
   return userState;

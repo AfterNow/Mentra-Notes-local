@@ -67,9 +67,12 @@ export class NotesApp extends AppServer {
     console.log(`\n📝 Notes session started for ${userId}`);
     session.dashboard.content.write("// Notes Ready");
 
+    // Get user's timezone from MentraOS settings (if set)
+    const timezone = session.settings.getMentraOS<string>('userTimezone');
+    // Initialize TimeManager with user's timezone
+    const timeManager = new TimeManager(timezone);
     // Get or create NotesSession for this user (may already exist from webview)
     const notesSession = await sessions.getOrCreate(userId);
-
     // Set the AppSession (glasses are now connected)
     notesSession.setAppSession(session);
 
@@ -87,10 +90,8 @@ export class NotesApp extends AppServer {
       notesSession.onTranscription(data.text, data.isFinal, data.speakerId);
 
       if (data.isFinal) {
-        const timezone = notesSession.settings.timezone ?? undefined;
-        const timeManager = new TimeManager(timezone);
         console.log(
-          `Today's date: ${timeManager.getTimestampInTimezone()} ${timeManager.getEndOfDayUTC()} ${timeManager.getCurrentTimestamp()} `,
+          `Today's date: ${timeManager.today()} | EOD: ${timeManager.endOfDay()} | UTC: ${timeManager.now()}`,
         );
         // Check and update batch date if day has passed
         await notesSession.transcript.setBatchDate();
@@ -105,9 +106,7 @@ export class NotesApp extends AppServer {
         const photo = await session.camera.requestPhoto({ size: "small" });
         console.log(`[NotesApp] Photo captured: ${photo.filename} (${photo.size} bytes)`);
 
-        const timezone = notesSession.settings.timezone ?? undefined;
-        const timeManager = new TimeManager(timezone);
-        const todayDate = timeManager.getTodayDate();
+        const todayDate = timeManager.today();
 
         // Signal frontend that a photo is being synced
         notesSession.transcript.isSyncingPhoto = true;
@@ -165,12 +164,8 @@ export class NotesApp extends AppServer {
   ): Promise<void> {
     console.log(`👋 Notes session ended for ${userId}: ${reason}`);
 
-    // Clear the AppSession (glasses disconnected) but keep the session
-    // so webview clients can still access data
-    const notesSession = sessions.get(userId);
-    if (notesSession) {
-      notesSession.clearAppSession();
-    }
+    // Remove session so next connect triggers a fresh hydrate()
+    await sessions.remove(userId);
   }
 
   /**

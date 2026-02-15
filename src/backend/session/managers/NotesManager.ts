@@ -68,7 +68,7 @@ export class NotesManager extends SyncedManager {
     if (note.date) {
       return note.date;
     }
-    return this.getTimeManager().getDateString(new Date(note.createdAt));
+    return this.getTimeManager().toDateString(new Date(note.createdAt));
   }
 
   private getProvider(): AgentProvider | null {
@@ -105,7 +105,7 @@ export class NotesManager extends SyncedManager {
           title: n.title,
           content: n.content || n.summary || "",
           summary: n.summary,
-          date: n.date || this.getTimeManager().getDateString(n.createdAt), // Fallback for old notes without date field
+          date: n.date || this.getTimeManager().toDateString(n.createdAt), // Fallback for old notes without date field
           isAIGenerated: n.isAIGenerated ?? false,
           createdAt: n.createdAt,
           updatedAt: n.updatedAt,
@@ -339,7 +339,7 @@ Rules:
       const now = new Date();
       // Use the transcript's loaded date for folder assignment
       // This ensures notes generated from historical transcripts go to the correct folder
-      const transcriptDate = this.getTranscriptLoadedDate() || this.getTimeManager().getTodayDate();
+      const transcriptDate = this.getTranscriptLoadedDate() || this.getTimeManager().today();
 
       const note: NoteData = {
         id: `note_${Date.now()}`,
@@ -378,7 +378,7 @@ Rules:
     const now = new Date();
     // Use the transcript's loaded date for folder assignment
     // This ensures manual notes created while viewing a historical date go to that folder
-    const transcriptDate = this.getTranscriptLoadedDate() || this.getTimeManager().getTodayDate();
+    const transcriptDate = this.getTranscriptLoadedDate() || this.getTimeManager().today();
 
     const note: NoteData = {
       id: `note_${Date.now()}`,

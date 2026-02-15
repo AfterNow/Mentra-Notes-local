@@ -164,7 +164,7 @@ export class CloudflareR2Manager extends SyncedManager {
 
     // Get TimeManager for date if not provided
     const timeManager = this.getTimeManager();
-    const batchDate = cutoffDate || timeManager?.getTodayDate() || "";
+    const batchDate = cutoffDate || timeManager?.today() || "";
 
     const result = await this.triggerBatch(userId, batchDate, timezone);
 
@@ -270,7 +270,7 @@ export class CloudflareR2Manager extends SyncedManager {
     return session?.settings || null;
   }
 
-  private getTimeManager(): { getTodayDate: () => string } | null {
+  private getTimeManager(): { today: () => string } | null {
     // Access time manager through transcript manager
     const session = this._session as any;
     return session?.transcript?.getTimeManager?.() || null;
