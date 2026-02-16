@@ -168,23 +168,22 @@ export function DayPage() {
   // Segments are loaded for "today" from the server, so we filter by comparing
   // the segment's local timestamp date with the selected date
   const daySegments = useMemo(() => {
+    // If the server already loaded segments for this exact date, use them all.
+    // The server handles timezone-aware date assignment, so no client-side
+    // filtering is needed — it would break due to UTC vs local timezone mismatch.
+    if (loadedDate === dateString) {
+      return allSegments;
+    }
+
+    // Fallback: filter by extracting YYYY-MM-DD from the UTC ISO timestamp
     return allSegments.filter((segment) => {
       if (!segment.timestamp) return false;
-
-      // Handle both Date objects and ISO strings (JSON serialization converts Date to string)
-      const timestamp = segment.timestamp;
-      const segmentDate =
-        timestamp instanceof Date ? timestamp : new Date(timestamp);
-
-      // Validate the date is valid
-      if (isNaN(segmentDate.getTime())) return false;
-
-      // Get local date components - this handles timezone conversion automatically
-      // since getFullYear/Month/Date return values in local timezone
-      const segmentDateString = `${segmentDate.getFullYear()}-${String(segmentDate.getMonth() + 1).padStart(2, "0")}-${String(segmentDate.getDate()).padStart(2, "0")}`;
-      return segmentDateString === dateString;
+      const iso = segment.timestamp instanceof Date
+        ? segment.timestamp.toISOString()
+        : String(segment.timestamp);
+      return iso.slice(0, 10) === dateString;
     });
-  }, [allSegments, dateString]);
+  }, [allSegments, dateString, loadedDate]);
 
   if (!session) {
     return <DayPageSkeleton />;

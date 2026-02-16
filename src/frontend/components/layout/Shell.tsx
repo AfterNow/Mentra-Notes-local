@@ -110,7 +110,7 @@ export function Shell({ children }: ShellProps) {
       {/* Mobile Bottom Navigation - hidden on detail pages */}
       {!hideBottomNav && (
       <div className="fixed bottom-0 left-0 right-0 md:hidden bg-white dark:bg-zinc-950  border-zinc-200 dark:border-zinc-800  z-30">
-        <div className="flex items-center justify-between h-[72px] px-12">
+        <div className="flex items-center justify-between h-[72px] px-12 mb-[5px]">
           {/* Home */}
           <button
             onClick={() => setLocation("/")}
