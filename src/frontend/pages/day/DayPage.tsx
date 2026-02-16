@@ -66,6 +66,7 @@ export function DayPage() {
 
   const [activeTab, setActiveTab] = useState<TabType>("transcript");
   const lastLoadedDateRef = useRef<string | null>(null);
+  const [isLoadingTranscript, setIsLoadingTranscript] = useState(false);
 
   // Super collapsed mode from persisted settings
   const isCompactMode = session?.settings?.superCollapsed ?? false;
@@ -101,8 +102,11 @@ export function DayPage() {
   const loadedDate = session?.transcript?.loadedDate ?? "";
   const files = session?.file?.files ?? [];
 
-  // Data is loading when the transcript hasn't loaded for this date yet
-  const isDataLoading = loadedDate !== dateString;
+  // Data is loading when the transcript hasn't loaded for this date yet,
+  // or when the server is still fetching from R2. This prevents flicker
+  // between old data → skeleton → empty → new data when switching dates.
+  const isLoadingHistory = session?.transcript?.isLoadingHistory ?? false;
+  const isDataLoading = loadedDate !== dateString || isLoadingHistory || isLoadingTranscript;
 
   // Find the file for this date to get favourite status
   const currentFile = useMemo(() => {
@@ -132,20 +136,25 @@ export function DayPage() {
     // Load the transcript for this date
     console.log(`[DayPage] Loading transcript for ${dateString}`);
     lastLoadedDateRef.current = dateString;
+    setIsLoadingTranscript(true);
 
     if (dateString === todayString) {
       // Switch back to today
-      session.transcript.loadTodayTranscript().catch((err) => {
-        console.error("[DayPage] Failed to load today's transcript:", err);
-      });
+      session.transcript.loadTodayTranscript()
+        .catch((err) => {
+          console.error("[DayPage] Failed to load today's transcript:", err);
+        })
+        .finally(() => setIsLoadingTranscript(false));
     } else {
       // Load historical date
-      session.transcript.loadDateTranscript(dateString).catch((err) => {
-        console.error(
-          `[DayPage] Failed to load transcript for ${dateString}:`,
-          err,
-        );
-      });
+      session.transcript.loadDateTranscript(dateString)
+        .catch((err) => {
+          console.error(
+            `[DayPage] Failed to load transcript for ${dateString}:`,
+            err,
+          );
+        })
+        .finally(() => setIsLoadingTranscript(false));
     }
   }, [dateString, todayString, loadedDate, session?.transcript]);
 
@@ -168,6 +177,9 @@ export function DayPage() {
   // Segments are loaded for "today" from the server, so we filter by comparing
   // the segment's local timestamp date with the selected date
   const daySegments = useMemo(() => {
+    // While loading, return empty to prevent stale data from flashing
+    if (isDataLoading) return [];
+
     // If the server already loaded segments for this exact date, use them all.
     // The server handles timezone-aware date assignment, so no client-side
     // filtering is needed — it would break due to UTC vs local timezone mismatch.
@@ -183,7 +195,7 @@ export function DayPage() {
         : String(segment.timestamp);
       return iso.slice(0, 10) === dateString;
     });
-  }, [allSegments, dateString, loadedDate]);
+  }, [allSegments, dateString, loadedDate, isDataLoading]);
 
   if (!session) {
     return <DayPageSkeleton />;
