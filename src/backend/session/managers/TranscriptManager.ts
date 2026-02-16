@@ -95,13 +95,17 @@ export class TranscriptManager extends SyncedManager {
   }
 
   private getTimeManager(): TimeManager {
-    if (!this.timeManager) {
-      // Prefer SettingsManager timezone (available during hydration, before glasses connect)
-      const settingsTimezone = (this._session as any)?.settings?.timezone as string | null;
-      const appTimezone = (this._session as any).appSession?.settings?.getMentraOS(
-        "userTimezone",
-      ) as string | undefined;
-      this.timeManager = new TimeManager(settingsTimezone || appTimezone);
+    // Always resolve the latest timezone — it may change when glasses connect
+    const settingsTimezone = (this._session as any)?.settings?.timezone as string | null;
+    const appTimezone = (this._session as any).appSession?.settings?.getMentraOS(
+      "userTimezone",
+    ) as string | undefined;
+    const currentTimezone = settingsTimezone || appTimezone || undefined;
+
+    // Recreate TimeManager if timezone changed (e.g. glasses connected after hydration)
+    if (!this.timeManager || (this as any)._lastTimezone !== currentTimezone) {
+      this.timeManager = new TimeManager(currentTimezone);
+      (this as any)._lastTimezone = currentTimezone;
     }
     return this.timeManager;
   }
