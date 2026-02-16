@@ -26,10 +26,11 @@ import type { AppSession } from "@mentra/sdk";
 
 export class NotesSession extends SyncedSession {
   // Managers - @manager decorator handles all wiring automatically
+  // IMPORTANT: settings must hydrate first — other managers read settings.timezone
+  @manager settings = new SettingsManager();
   @manager transcript = new TranscriptManager();
   @manager notes = new NotesManager();
   @manager chat = new ChatManager();
-  @manager settings = new SettingsManager();
   @manager r2 = new CloudflareR2Manager();
   @manager file = new FileManager();
   @manager photo = new PhotoManager();
