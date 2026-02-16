@@ -19,6 +19,7 @@ import {
   FileManager,
   PhotoManager,
 } from "./managers";
+import { InputManager } from "./managers/InputManager";
 import type { AppSession } from "@mentra/sdk";
 
 export class NotesSession extends SyncedSession {
@@ -30,6 +31,7 @@ export class NotesSession extends SyncedSession {
   @manager r2 = new CloudflareR2Manager();
   @manager file = new FileManager();
   @manager photo = new PhotoManager();
+  @manager input = new InputManager();
 
   // MentraOS AppSession - null if no glasses connected (not synced)
   private _appSession: AppSession | null = null;
@@ -74,6 +76,8 @@ export class NotesSession extends SyncedSession {
       );
       // Broadcast state change
       this.broadcastStateChange("session", "hasGlassesConnected", true);
+      // Wire up button + touch listeners for this user's session
+      this.input.setup(appSession);
       // Note: FileManager is hydrated once during session creation.
       // We no longer re-hydrate on glasses connect to avoid
       // race conditions with user filter selections.

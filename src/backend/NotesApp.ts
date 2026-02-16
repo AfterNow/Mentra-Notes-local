@@ -14,8 +14,6 @@ import { AppServer, AppSession } from "@mentra/sdk";
 import { sessions, NotesSession } from "./session";
 import { TimeManager } from "./session/managers/TimeManager";
 import { connectDB, disconnectDB } from "./services/db";
-import { uploadPhotoToR2 } from "./services/r2Upload.service";
-import { analyzeImage } from "./services/llm/gemini";
 
 
 export interface NotesAppConfig {
@@ -95,52 +93,6 @@ export class NotesApp extends AppServer {
         );
         // Check and update batch date if day has passed
         await notesSession.transcript.setBatchDate();
-      }
-    });
-
-    // Capture photo on button press and upload to R2
-    session.events.onButtonPress(async (data) => {
-      console.log(`[NotesApp] Button pressed: ${data.buttonId} (${data.pressType})`);
-
-      try {
-        const photo = await session.camera.requestPhoto({ size: "small" });
-        console.log(`[NotesApp] Photo captured: ${photo.filename} (${photo.size} bytes)`);
-
-        const todayDate = timeManager.today();
-
-        // Signal frontend that a photo is being synced
-        notesSession.transcript.isSyncingPhoto = true;
-
-        const result = await uploadPhotoToR2({
-          userId,
-          date: todayDate,
-          buffer: photo.buffer,
-          mimeType: photo.mimeType,
-          timestamp: photo.timestamp,
-          timezone,
-        });
-
-        if (result.success) {
-          console.log(`[NotesApp] Photo uploaded to R2: ${result.url}`);
-
-          // Analyze the image for a description (non-blocking — segment is added either way)
-          let description: string | undefined;
-          try {
-            description = await analyzeImage(photo.buffer.toString("base64"), photo.mimeType);
-            console.log(`[NotesApp] Photo description: ${description}`);
-          } catch (err) {
-            console.warn(`[NotesApp] Image analysis failed, saving without description:`, err);
-          }
-
-          notesSession.transcript.addPhotoSegment(result.url!, photo.mimeType, timezone, description);
-        } else {
-          console.error(`[NotesApp] Photo R2 upload failed: ${result.error?.message}`);
-        }
-
-        notesSession.transcript.isSyncingPhoto = false;
-      } catch (error) {
-        console.error(`[NotesApp] Photo capture/upload error:`, error);
-        notesSession.transcript.isSyncingPhoto = false;
       }
     });
 
