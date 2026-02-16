@@ -81,14 +81,30 @@ export class NotesSession extends SyncedSession {
       // Wire up button + touch listeners for this user's session
       this.input.setup(appSession);
 
-      // Now that glasses are connected, persist the user's IANA timezone
+      // Now that glasses are connected, get the user's IANA timezone
       const timezone = appSession.settings.getMentraOS<string>("userTimezone");
       if (timezone) {
+        // Persist timezone to SettingsManager (so future hydrations use correct timezone)
+        if (this.settings.timezone !== timezone) {
+          this.settings.timezone = timezone;
+          this.settings.updateSettings({ timezone }).catch((err) =>
+            console.error(`[NotesSession] Failed to persist timezone to settings:`, err),
+          );
+        }
+
+        // Persist timezone to UserState + fix EOD
         const timeManager = new TimeManager(timezone);
         const endOfDay = new Date(timeManager.endOfDay());
         createUserState(this.userId, endOfDay, timezone).catch((err) =>
-          console.error(`[NotesSession] Failed to update timezone:`, err),
+          console.error(`[NotesSession] Failed to update user state:`, err),
         );
+
+        // Fix loadedDate if hydration used wrong timezone (e.g. UTC server)
+        const correctToday = timeManager.today();
+        if (this.transcript.loadedDate !== correctToday) {
+          console.log(`[NotesSession] Fixing loadedDate: ${this.transcript.loadedDate} -> ${correctToday}`);
+          this.transcript.loadedDate = correctToday;
+        }
       }
 
       // Note: FileManager is hydrated once during session creation.
