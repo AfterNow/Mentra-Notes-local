@@ -102,13 +102,12 @@ export function DayPage() {
   const loadedDate = session?.transcript?.loadedDate ?? "";
   const files = session?.file?.files ?? [];
 
-  // Data is loading when the transcript hasn't loaded for this date yet,
-  // or when the server is still fetching from R2. This prevents flicker
-  // between old data → skeleton → empty → new data when switching dates.
-  // Once loadedDate matches, the server has the data ready — trust it.
+  // Data is loading when the server is actively fetching (R2 or MongoDB).
+  // We trust that if segments exist and nothing is loading, the data is ready.
   const isLoadingHistory = session?.transcript?.isLoadingHistory ?? false;
-  const serverHasData = loadedDate === dateString && !isLoadingHistory;
-  const isDataLoading = !serverHasData && (loadedDate !== dateString || isLoadingHistory || isLoadingTranscript);
+  const hasSegments = allSegments.length > 0;
+  const serverHasData = (loadedDate === dateString || hasSegments) && !isLoadingHistory;
+  const isDataLoading = !serverHasData && (isLoadingHistory || isLoadingTranscript);
 
   // Find the file for this date to get favourite status
   const currentFile = useMemo(() => {
@@ -182,10 +181,10 @@ export function DayPage() {
     // While loading, return empty to prevent stale data from flashing
     if (isDataLoading) return [];
 
-    // If the server already loaded segments for this exact date, use them all.
-    // The server handles timezone-aware date assignment, so no client-side
+    // If server has data (loadedDate matches OR segments exist), use them.
+    // The server handles timezone-aware date loading, so no client-side
     // filtering is needed — it would break due to UTC vs local timezone mismatch.
-    if (loadedDate === dateString) {
+    if (loadedDate === dateString || allSegments.length > 0) {
       return allSegments;
     }
 
