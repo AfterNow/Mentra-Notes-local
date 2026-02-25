@@ -376,6 +376,7 @@ export function DayPage() {
                 interimText={isToday ? interimText : ""}
                 currentHour={isToday ? currentHour : undefined}
                 dateString={dateString}
+                timezone={session?.settings?.timezone ?? undefined}
                 onGenerateSummary={session?.transcript?.generateHourSummary}
                 isCompactMode={isCompactMode}
                 isSyncingPhoto={isToday ? isSyncingPhoto : false}

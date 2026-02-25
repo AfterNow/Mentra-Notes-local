@@ -23,6 +23,7 @@ interface TranscriptTabProps {
   interimText?: string;
   currentHour?: number; // Only provided for "today" - undefined for historical days
   dateString: string;
+  timezone?: string; // IANA timezone for correct hour grouping (e.g., "America/Los_Angeles")
   onGenerateSummary?: (hour: number) => Promise<HourSummary>;
   isCompactMode?: boolean; // When true, all hours show in minimal/compact view
   isSyncingPhoto?: boolean; // When true, a photo is being uploaded/analyzed
@@ -53,6 +54,7 @@ export function TranscriptTab({
   interimText = "",
   currentHour,
   dateString,
+  timezone,
   onGenerateSummary,
   isCompactMode = false,
   isSyncingPhoto = false,
@@ -88,12 +90,23 @@ export function TranscriptTab({
     return `${hour.toString().padStart(2, "0")}:00|${hour12} ${ampm}`;
   };
 
+  // Extract hour (0-23) from a timestamp in the user's timezone
+  const getHourInTimezone = (timestamp: Date | string): number => {
+    const date = typeof timestamp === "string" ? new Date(timestamp) : timestamp;
+    if (timezone) {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        hour: "2-digit",
+        hour12: false,
+        timeZone: timezone,
+      }).formatToParts(date);
+      return parseInt(parts.find((p) => p.type === "hour")?.value || "0", 10);
+    }
+    return date.getHours();
+  };
+
   // Parse timestamp and return hour key for grouping
   const getHourKey = (timestamp: Date | string): string => {
-    const date =
-      typeof timestamp === "string" ? new Date(timestamp) : timestamp;
-    const hour = date.getHours();
-    return createHourKey(hour);
+    return createHourKey(getHourInTimezone(timestamp));
   };
 
   // Format timestamp for display (12-hour with AM/PM)
@@ -104,10 +117,12 @@ export function TranscriptTab({
       hour: "numeric",
       minute: "2-digit",
       hour12: true,
+      ...(timezone && { timeZone: timezone }),
     });
   };
 
   // Group segments by hour (memoized to avoid re-computing on every render)
+  // Also ensures the current hour appears even if only interim text exists (no final segments yet)
   const { groupedSegments, sortedHours } = useMemo(() => {
     const grouped: GroupedSegments = segments.reduce((acc, segment) => {
       if (!segment.timestamp) return acc;
@@ -119,6 +134,15 @@ export function TranscriptTab({
       return acc;
     }, {} as GroupedSegments);
 
+    // If there's interim text and a current hour, ensure that hour exists in the groups
+    // so the hour section renders immediately (before any final segment arrives)
+    if (currentHour !== undefined && interimText.trim().length > 0) {
+      const currentHourKey = createHourKey(currentHour);
+      if (!grouped[currentHourKey]) {
+        grouped[currentHourKey] = [];
+      }
+    }
+
     const sorted = Object.keys(grouped).sort((a, b) => {
       const { hour24: hourA } = parseHourKey(a);
       const { hour24: hourB } = parseHourKey(b);
@@ -126,7 +150,7 @@ export function TranscriptTab({
     });
 
     return { groupedSegments: grouped, sortedHours: sorted };
-  }, [segments]);
+  }, [segments, currentHour, interimText]);
 
   // Get summary for a specific hour
   const getHourSummary = (hour: number): HourSummary | undefined => {
@@ -393,7 +417,7 @@ export function TranscriptTab({
     );
   }
 
-  if (segments.length === 0) {
+  if (segments.length === 0 && sortedHours.length === 0) {
     return (
       <div className="h-full flex items-center justify-center">
         <div className="text-center py-12 text-zinc-400">
