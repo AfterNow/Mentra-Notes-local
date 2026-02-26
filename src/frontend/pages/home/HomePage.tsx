@@ -21,6 +21,7 @@ import {
   FolderOpen,
   Loader2,
 } from "lucide-react";
+import { clsx } from "clsx";
 import { motion } from "motion/react";
 import { useSynced } from "../../hooks/useSynced";
 import type { SessionI, FileFilter } from "../../../shared/types";
@@ -35,6 +36,7 @@ import { CalendarView } from "./components/CalendarView";
 import { GlobalAIChat } from "./components/GlobalAIChat";
 import { Drawer } from "vaul";
 import { HomePageSkeleton } from "../../components/shared/SkeletonLoader";
+import { useFeatureFlag } from "../../lib/posthog";
 
 export function HomePage() {
   const { userId } = useMentraAuth();
@@ -48,6 +50,7 @@ export function HomePage() {
   const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
   const [showGlobalChat, setShowGlobalChat] = useState(false);
   const [isEmptyingTrash, setIsEmptyingTrash] = useState(false);
+  const newMentraUI = useFeatureFlag('new-mentraos-ui-miniapps');
   const [showEmptyTrashConfirm, setShowEmptyTrashConfirm] = useState(false);
 
   // Derive data from session - now using FileManager as source of truth
@@ -315,7 +318,7 @@ export function HomePage() {
 
             <button
               onClick={handleCalendarToggle}
-              className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors"
+              className={clsx("w-10 h-10 flex items-center justify-center rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors", newMentraUI && "mr-[100px]")}
             >
               <Calendar size={20} strokeWidth={1.5} />
             </button>

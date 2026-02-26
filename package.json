@@ -41,6 +41,7 @@
     "lucide-react": "^0.545.0",
     "mongoose": "^9.0.2",
     "motion": "^12.31.0",
+    "posthog-js": "^1.354.3",
     "prop-types": "^15.8.1",
     "react": "^19",
     "react-dom": "^19",

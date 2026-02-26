@@ -42,6 +42,7 @@ import { AITab } from "./components/tabs/AITab";
 import { TranscribingIndicator } from "../../components/shared/TranscribingIndicator";
 import { DropdownMenu, type DropdownMenuOption } from "../../components/shared/DropdownMenu";
 import { DayPageSkeleton } from "../../components/shared/SkeletonLoader";
+import { useFeatureFlag } from "../../lib/posthog";
 
 type TabType = "notes" | "transcript" | "audio" | "ai";
 
@@ -64,6 +65,7 @@ export function DayPage() {
   const { userId } = useMentraAuth();
   const { session, isConnected } = useSynced<SessionI>(userId || "");
 
+  const newMentraUI = useFeatureFlag('new-mentraos-ui-miniapps');
   const [activeTab, setActiveTab] = useState<TabType>("transcript");
   const lastLoadedDateRef = useRef<string | null>(null);
   const [isLoadingTranscript, setIsLoadingTranscript] = useState(false);
@@ -237,7 +239,7 @@ export function DayPage() {
       {/* Header */}
       <div className="shrink-0 border-b border-zinc-200 dark:border-zinc-800">
         {/* Top row with back button and actions */}
-        <div className="flex items-center justify-between px-[10px] pt-4 pb-2">
+        <div className={clsx("flex items-center justify-between px-[10px] pt-4 pb-2", newMentraUI && "mr-[100px]")}>
           <button
             onClick={handleBack}
             className="p-2 -ml-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-600 dark:text-zinc-400 transition-colors"
