@@ -66,7 +66,10 @@ export function DayPage() {
   const { session, isConnected } = useSynced<SessionI>(userId || "");
 
   const newMentraUI = useFeatureFlag('new-mentraos-ui-miniapps');
-  const [activeTab, setActiveTab] = useState<TabType>("transcript");
+  const [activeTab, setActiveTab] = useState<TabType>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return (params.get("tab") as TabType) || "transcript";
+  });
   const lastLoadedDateRef = useRef<string | null>(null);
   const [isLoadingTranscript, setIsLoadingTranscript] = useState(false);
   // Snapshot segment count when a historical date finishes loading,
@@ -369,7 +372,7 @@ export function DayPage() {
             className="h-full"
           >
             {activeTab === "notes" && (
-              <NotesTab notes={dayNotes} dateString={dateString} isLoading={isDataLoading} />
+              <NotesTab notes={dayNotes} isLoading={isDataLoading} />
             )}
             {activeTab === "transcript" && (
               <TranscriptTab
