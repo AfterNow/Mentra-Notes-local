@@ -69,6 +69,8 @@ export function TranscriptTab({
   // Measured spinner height per hour (header bottom → container bottom)
   const [spinnerHeights, setSpinnerHeights] = useState<Map<string, number>>(new Map());
   const [generatingHour, setGeneratingHour] = useState<number | null>(null);
+  // Track which hour banners have their body text fully expanded
+  const [expandedBodies, setExpandedBodies] = useState<Set<string>>(new Set());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const headerRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
@@ -182,6 +184,19 @@ export function TranscriptTab({
     return {
       title: lines[0].trim(),
       body: lines.slice(1).join(" ").trim(),
+    };
+  };
+
+  /**
+   * Truncate text to a max word count
+   */
+  const truncateBody = (text: string, maxWords = 20): { truncated: string; isTruncated: boolean } => {
+    if (!text) return { truncated: "", isTruncated: false };
+    const words = text.split(/\s+/);
+    if (words.length <= maxWords) return { truncated: text, isTruncated: false };
+    return {
+      truncated: words.slice(0, maxWords).join(" ") + "...",
+      isTruncated: true,
     };
   };
 
@@ -339,6 +354,11 @@ export function TranscriptTab({
         return newSet;
       });
       setExpandedHours((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(hourKey);
+        return newSet;
+      });
+      setExpandedBodies((prev) => {
         const newSet = new Set(prev);
         newSet.delete(hourKey);
         return newSet;
@@ -563,11 +583,32 @@ export function TranscriptTab({
                         <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
                           {banner.title}
                         </p>
-                        {banner.body && (
-                          <p className="text-[10px] text-zinc-500 dark:text-zinc-400 line-clamp-2 mt-0.5">
-                            {banner.body}
-                          </p>
-                        )}
+                        {banner.body && (() => {
+                          const { truncated, isTruncated } = truncateBody(banner.body);
+                          const isBodyExpanded = expandedBodies.has(hourKey);
+                          return (
+                            <p className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+                              {isBodyExpanded ? banner.body : truncated}
+                              {isTruncated && (
+                                <span
+                                  role="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setExpandedBodies((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(hourKey)) next.delete(hourKey);
+                                      else next.add(hourKey);
+                                      return next;
+                                    });
+                                  }}
+                                  className="ml-1 text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300 cursor-pointer font-medium"
+                                >
+                                  {isBodyExpanded ? "Less" : "More"}
+                                </span>
+                              )}
+                            </p>
+                          );
+                        })()}
                       </>
                     ) : (
                       /* Preview (when no summary) */
@@ -621,11 +662,32 @@ export function TranscriptTab({
                         {banner.title}
                       </p>
                     )}
-                    {banner.body && (
-                      <p className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5">
-                        {banner.body}
-                      </p>
-                    )}
+                    {banner.body && (() => {
+                      const { truncated, isTruncated } = truncateBody(banner.body);
+                      const isBodyExpanded = expandedBodies.has(hourKey);
+                      return (
+                        <p className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+                          {isBodyExpanded ? banner.body : truncated}
+                          {isTruncated && (
+                            <span
+                              role="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setExpandedBodies((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(hourKey)) next.delete(hourKey);
+                                  else next.add(hourKey);
+                                  return next;
+                                });
+                              }}
+                              className="ml-1 text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300 cursor-pointer font-medium"
+                            >
+                              {isBodyExpanded ? "Less" : "More"}
+                            </span>
+                          )}
+                        </p>
+                      );
+                    })()}
                   </div>
                 )}
 
