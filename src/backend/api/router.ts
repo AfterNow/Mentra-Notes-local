@@ -12,12 +12,14 @@ import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { sessions } from "../session";
 import {
   getOrCreateDailyTranscript,
+  getDailyTranscript,
   Note as NoteModel,
   UserSettings,
   File as FileModel,
   getFiles,
   updateFile,
 } from "../models";
+import { rewriteR2Urls } from "../../shared/constants";
 
 // Environment
 const API_KEY = process.env.MENTRAOS_API_KEY || "";
@@ -37,18 +39,10 @@ const authMiddleware = createAuthMiddleware({
 });
 
 /**
- * Get userId from auth context or header
+ * Get userId from auth context
  */
 function getUserId(c: any): string | null {
-  // Try auth context first (from middleware)
-  const authUserId = c.get("userId");
-  if (authUserId) return authUserId;
-
-  // Fallback to header
-  const headerUserId = c.req.header("x-user-id");
-  if (headerUserId) return headerUserId;
-
-  return null;
+  return c.get("userId") || null;
 }
 
 /**
@@ -74,6 +68,33 @@ function requireSession(c: any) {
   }
 
   return { userId, session };
+}
+
+/** Derive base URL from the incoming request headers */
+function getBaseUrl(c: any): string {
+  const origin = c.req.header("origin");
+  if (origin) return origin;
+
+  const host = c.req.header("host");
+  const proto = c.req.header("x-forwarded-proto") || "https";
+  if (host) return `${proto}://${host}`;
+
+  return process.env.BASE_URL || "https://localhost:3000";
+}
+
+/** Strip dangerous HTML patterns from email content */
+function sanitizeEmailHtml(html: string): string {
+  return html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/\s+on\w+\s*=\s*["'][^"']*["']/gi, "")
+    .replace(/\s+on\w+\s*=\s*[^\s>]+/gi, "")
+    .replace(/href\s*=\s*["']javascript:[^"']*["']/gi, 'href="#"')
+    .replace(/src\s*=\s*["']javascript:[^"']*["']/gi, 'src=""')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<iframe[^>]*>[\s\S]*?<\/iframe>/gi, "")
+    .replace(/<form[^>]*>[\s\S]*?<\/form>/gi, "")
+    .replace(/<input[^>]*\/?>/gi, "")
+    .replace(/<button[^>]*>[\s\S]*?<\/button>/gi, "");
 }
 
 // =============================================================================
@@ -681,7 +702,7 @@ api.get("/photos/:date/:filename", authMiddleware, async (c) => {
 /**
  * POST /email/send - Send notes email (supports multiple notes in one email)
  */
-api.post("/email/send", async (c) => {
+api.post("/email/send", authMiddleware, async (c) => {
   try {
     const body = await c.req.json();
     const { to, cc, sessionDate, sessionStartTime, sessionEndTime, notes } = body;
@@ -693,20 +714,36 @@ api.post("/email/send", async (c) => {
       return c.json({ error: "notes array is required and must not be empty" }, 400);
     }
 
+    // Validate each note item
+    for (const note of notes) {
+      if (!note.noteId || !note.noteTitle || typeof note.noteContent !== "string") {
+        return c.json({ error: "Each note must have noteId, noteTitle, and noteContent" }, 400);
+      }
+    }
+
+    // Sanitize note content for email
+    const sanitizedNotes = notes.map((note: any) => ({
+      ...note,
+      noteTitle: sanitizeEmailHtml(note.noteTitle),
+      noteContent: sanitizeEmailHtml(note.noteContent),
+    }));
+
     const { sendNotesEmail } = await import("../services/resend.service");
+    const baseUrl = getBaseUrl(c);
     const result = await sendNotesEmail({
       to,
       cc: cc || undefined,
       sessionDate: sessionDate || "Unknown Date",
       sessionStartTime: sessionStartTime || "",
       sessionEndTime: sessionEndTime || "",
-      notes,
+      notes: sanitizedNotes,
+      baseUrl,
     });
 
     return c.json({ success: true, data: result });
   } catch (err: any) {
     console.error("[Email Send] Error:", err);
-    return c.json({ error: err.message || "Failed to send email", details: String(err) }, 500);
+    return c.json({ error: "Failed to send email" }, 500);
   }
 });
 
@@ -721,6 +758,13 @@ api.get("/notes/:id/download/:format", async (c) => {
   try {
     const noteId = c.req.param("id");
     const format = c.req.param("format");
+    const token = c.req.query("token");
+
+    // Verify signed token
+    const { verifyDownloadToken } = await import("../services/signedUrl.service");
+    if (!token || !verifyDownloadToken(noteId, token)) {
+      return c.json({ error: "Invalid or expired download link" }, 403);
+    }
 
     if (!["txt", "pdf", "docx"].includes(format)) {
       return c.json({ error: "Invalid format. Use txt, pdf, or docx" }, 400);
@@ -767,10 +811,7 @@ api.get("/notes/:id/download/:format", async (c) => {
     const noteType = noteData.isAIGenerated ? "AI Generated" : "Manual";
 
     // Rewrite private R2 URLs to public URLs so images can be fetched
-    const publicContent = noteData.content.replaceAll(
-      "https://3c764e987404b8a1199ce5fdc3544a94.r2.cloudflarestorage.com/mentra-notes/",
-      "https://pub-b5f134142a0f4fbdb5c05a2f75fc8624.r2.dev/",
-    );
+    const publicContent = rewriteR2Urls(noteData.content);
 
     const exportData = {
       title: noteData.title,
@@ -815,7 +856,7 @@ api.get("/notes/:id/download/:format", async (c) => {
     return c.json({ error: "Invalid format" }, 400);
   } catch (err: any) {
     console.error("[Note Download] Error:", err);
-    return c.json({ error: err.message || "Failed to generate download" }, 500);
+    return c.json({ error: "Failed to generate download" }, 500);
   }
 });
 
@@ -826,7 +867,7 @@ api.get("/notes/:id/download/:format", async (c) => {
 /**
  * POST /transcript/email - Send transcript via email
  */
-api.post("/transcript/email", async (c) => {
+api.post("/transcript/email", authMiddleware, async (c) => {
   try {
     const body = await c.req.json();
     const { to, cc, userId, date, sessionDate, sessionStartTime, sessionEndTime, segments } = body;
@@ -841,8 +882,16 @@ api.post("/transcript/email", async (c) => {
       return c.json({ error: "segments array is required" }, 400);
     }
 
+    // Validate each segment
+    for (const seg of segments) {
+      if (typeof seg.timestamp !== "string" || typeof seg.text !== "string") {
+        return c.json({ error: "Each segment must have timestamp and text strings" }, 400);
+      }
+    }
+
     const { sendTranscriptEmail } = await import("../services/resend.service");
     const transcriptId = `${userId}:${date}`;
+    const baseUrl = getBaseUrl(c);
 
     const result = await sendTranscriptEmail({
       to,
@@ -852,12 +901,13 @@ api.post("/transcript/email", async (c) => {
       sessionStartTime: sessionStartTime || "",
       sessionEndTime: sessionEndTime || "",
       segments,
+      baseUrl,
     });
 
     return c.json({ success: true, data: result });
   } catch (err: any) {
     console.error("[Transcript Email] Error:", err);
-    return c.json({ error: err.message || "Failed to send email", details: String(err) }, 500);
+    return c.json({ error: "Failed to send email" }, 500);
   }
 });
 
@@ -869,6 +919,13 @@ api.get("/transcripts/:transcriptId/download/:format", async (c) => {
   try {
     const transcriptId = c.req.param("transcriptId");
     const format = c.req.param("format");
+    const token = c.req.query("token");
+
+    // Verify signed token
+    const { verifyDownloadToken } = await import("../services/signedUrl.service");
+    if (!token || !verifyDownloadToken(transcriptId, token)) {
+      return c.json({ error: "Invalid or expired download link" }, 403);
+    }
 
     if (!["txt", "pdf", "docx"].includes(format)) {
       return c.json({ error: "Invalid format. Use txt, pdf, or docx" }, 400);
@@ -901,8 +958,8 @@ api.get("/transcripts/:transcriptId/download/:format", async (c) => {
 
     // 2. MongoDB
     if (segments.length === 0) {
-      const transcript = await getOrCreateDailyTranscript(userId, date);
-      const dbSegs = (transcript.segments || []).filter(
+      const transcript = await getDailyTranscript(userId, date);
+      const dbSegs = (transcript?.segments || []).filter(
         (s) => s.isFinal && s.type !== "photo"
       );
       if (dbSegs.length > 0) {
@@ -1006,7 +1063,7 @@ api.get("/transcripts/:transcriptId/download/:format", async (c) => {
     return c.json({ error: "Invalid format" }, 400);
   } catch (err: any) {
     console.error("[Transcript Download] Error:", err);
-    return c.json({ error: err.message || "Failed to generate download" }, 500);
+    return c.json({ error: "Failed to generate download" }, 500);
   }
 });
 

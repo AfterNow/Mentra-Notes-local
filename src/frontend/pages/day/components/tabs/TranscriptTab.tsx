@@ -36,13 +36,11 @@ interface GroupedSegments {
   [hourKey: string]: TranscriptSegment[];
 }
 
-// R2 private endpoint → public URL rewrite for legacy segments
-const R2_PRIVATE_PREFIX = "https://3c764e987404b8a1199ce5fdc3544a94.r2.cloudflarestorage.com/mentra-notes/";
-const R2_PUBLIC_PREFIX = "https://pub-b5f134142a0f4fbdb5c05a2f75fc8624.r2.dev/";
+import { R2_PRIVATE_URL_PREFIX, R2_PUBLIC_URL_PREFIX } from "../../../../../shared/constants";
 
 function getPhotoSrc(url: string): string {
-  if (url.startsWith(R2_PRIVATE_PREFIX)) {
-    return url.replace(R2_PRIVATE_PREFIX, R2_PUBLIC_PREFIX);
+  if (url.startsWith(R2_PRIVATE_URL_PREFIX)) {
+    return url.replace(R2_PRIVATE_URL_PREFIX, R2_PUBLIC_URL_PREFIX);
   }
   return url;
 }

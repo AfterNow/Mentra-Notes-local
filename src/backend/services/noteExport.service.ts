@@ -1,4 +1,7 @@
-import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import { PDFDocument, rgb } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
+import { readFileSync } from "fs";
+import { resolve } from "path";
 import {
   Document,
   Packer,
@@ -9,26 +12,9 @@ import {
   BorderStyle,
 } from "docx";
 
-// =============================================================================
-// Helpers
-// =============================================================================
-
-/** Keep only printable ASCII (0x20-0x7E), mapping common Unicode to ASCII equivalents. */
-function toAscii(text: string): string {
-  const mapped = text
-    .replace(/[\u2018\u2019\u201A]/g, "'")
-    .replace(/[\u201C\u201D\u201E]/g, '"')
-    .replace(/[\u2013\u2014]/g, "-")
-    .replace(/\u2026/g, "...")
-    .replace(/\u2022/g, "*")
-    .replace(/\u00A0/g, " ");
-  let out = "";
-  for (let i = 0; i < mapped.length; i++) {
-    const c = mapped.charCodeAt(i);
-    if (c >= 0x20 && c <= 0x7E) out += mapped[i];
-  }
-  return out.replace(/\s+/g, " ").trim();
-}
+// Load font buffers once at startup
+const NOTO_REGULAR = readFileSync(resolve(import.meta.dir, "../../public/fonts/NotoSans-Regular.ttf"));
+const NOTO_BOLD = readFileSync(resolve(import.meta.dir, "../../public/fonts/NotoSans-Bold.ttf"));
 
 /** Extract image URLs from HTML */
 function extractImages(html: string): string[] {
@@ -256,8 +242,9 @@ export function generateTxt({ title, content, sessionDate, noteType, noteTimesta
 
 export async function generatePdf({ title, content, sessionDate, noteType, noteTimestamp }: NoteExportData): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
-  const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  pdfDoc.registerFontkit(fontkit);
+  const helvetica = await pdfDoc.embedFont(NOTO_REGULAR);
+  const helveticaBold = await pdfDoc.embedFont(NOTO_BOLD);
 
   const plainContent = stripHtml(content);
   const imageUrls = extractImages(content);
@@ -287,9 +274,8 @@ export async function generatePdf({ title, content, sessionDate, noteType, noteT
   };
 
   const drawText = (text: string, font: typeof helvetica, size: number, color = rgb(0.1, 0.1, 0.1)) => {
-    const safeText = toAscii(text);
-    if (!safeText) return;
-    const words = safeText.split(" ");
+    if (!text.trim()) return;
+    const words = text.split(" ");
     let line = "";
     const lines: string[] = [];
 
@@ -385,8 +371,6 @@ export async function generateDocx({ title, content, sessionDate, noteType, note
   // Use the same reliable stripHtml approach as PDF, plus image support
   const plainContent = stripHtml(content);
   const imageUrls = extractImages(content);
-  console.log("[DOCX] Found", imageUrls.length, "images in content");
-  if (imageUrls.length > 0) console.log("[DOCX] Image URLs:", imageUrls);
 
   // Pre-fetch images
   const imageCache = new Map<string, { buffer: Buffer; type: string }>();
@@ -394,10 +378,7 @@ export async function generateDocx({ title, content, sessionDate, noteType, note
     imageUrls.map(async (url) => {
       const img = await fetchImage(url);
       if (img) {
-        console.log("[DOCX] Fetched image:", url, "size:", img.buffer.length, "type:", img.type);
         imageCache.set(url, img);
-      } else {
-        console.log("[DOCX] Failed to fetch image:", url);
       }
     }),
   );
@@ -414,7 +395,7 @@ export async function generateDocx({ title, content, sessionDate, noteType, note
           text: title,
           bold: true,
           size: 48, // 24pt
-          font: "Helvetica Neue",
+          font: "Calibri",
           color: "1A1A1A",
         }),
       ],
@@ -431,7 +412,7 @@ export async function generateDocx({ title, content, sessionDate, noteType, note
             text: metaParts.join("  \u2022  "),
             color: "888888",
             size: 20, // 10pt
-            font: "Helvetica Neue",
+            font: "Calibri",
           }),
         ],
         spacing: { after: 200 },
@@ -468,7 +449,7 @@ export async function generateDocx({ title, content, sessionDate, noteType, note
             new TextRun({
               text: bulletText,
               size: 22,
-              font: "Helvetica Neue",
+              font: "Calibri",
               color: "3A3A3A",
             }),
           ],
@@ -483,7 +464,7 @@ export async function generateDocx({ title, content, sessionDate, noteType, note
             new TextRun({
               text: line,
               size: 22, // 11pt
-              font: "Helvetica Neue",
+              font: "Calibri",
               color: "3A3A3A",
             }),
           ],
@@ -500,7 +481,6 @@ export async function generateDocx({ title, content, sessionDate, noteType, note
     try {
       // Use fixed dimensions scaled to fit — avoids fragile JPEG header parsing
       const imgType = imgData.type.includes("png") ? "png" : "jpg";
-      console.log("[DOCX] Embedding image:", url, "type:", imgType, "bufferLen:", imgData.buffer.length);
 
       children.push(
         new Paragraph({
@@ -514,7 +494,6 @@ export async function generateDocx({ title, content, sessionDate, noteType, note
           spacing: { before: 200, after: 200 },
         }),
       );
-      console.log("[DOCX] Image paragraph added successfully");
     } catch (err) {
       console.error("[DOCX] Failed to embed image:", err);
     }
@@ -536,7 +515,7 @@ export async function generateDocx({ title, content, sessionDate, noteType, note
           text: "Generated by Mentra Notes",
           color: "AAAAAA",
           size: 16, // 8pt
-          font: "Helvetica Neue",
+          font: "Calibri",
         }),
       ],
     }),

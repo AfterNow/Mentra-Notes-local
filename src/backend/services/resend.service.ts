@@ -1,15 +1,26 @@
 import { Resend } from "resend";
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import { generateDownloadToken } from "./signedUrl.service";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
-
-const BASE_URL = process.env.BASE_URL || "https://general.dev.tpa.ngrok.app";
+if (!process.env.RESEND_API_KEY) {
+  console.warn("[Resend] RESEND_API_KEY not set — email sending will fail");
+}
 
 // Load templates once at startup
 const templateDir = resolve(import.meta.dir, "../../public/resend-email-template");
 const emailTemplate = readFileSync(resolve(templateDir, "notes-email.html"), "utf-8");
 const transcriptTemplate = readFileSync(resolve(templateDir, "transcript-email.html"), "utf-8");
+
+/** Escape plain text for safe HTML interpolation */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 
 interface NoteItem {
   noteId: string;
@@ -28,10 +39,11 @@ interface SendNotesEmailRequest {
   notes: NoteItem[];
 }
 
-function buildNoteCardHtml(note: NoteItem): string {
+function buildNoteCardHtml(note: NoteItem, baseUrl: string): string {
   const badgeBg = note.noteType === "AI Generated" ? "#E8F5E9" : "#E3F2FD";
   const badgeColor = note.noteType === "AI Generated" ? "#2E7D32" : "#1565C0";
-  const downloadBase = `${BASE_URL}/api/notes/${note.noteId}/download`;
+  const token = generateDownloadToken(note.noteId);
+  const downloadBase = `${baseUrl}/api/notes/${note.noteId}/download`;
 
   return `<tr>
   <td style="padding:0 40px 16px;">
@@ -59,15 +71,15 @@ function buildNoteCardHtml(note: NoteItem): string {
           <table cellpadding="0" cellspacing="0" border="0" style="margin-top:20px;">
             <tr>
               <td align="center" style="background-color:#1A1A1A;border-radius:6px;padding:6px 12px;">
-                <a href="${downloadBase}/pdf" style="color:#FFFFFF;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:12px;font-weight:500;line-height:16px;text-decoration:none;">PDF</a>
+                <a href="${downloadBase}/pdf?token=${token}" style="color:#FFFFFF;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:12px;font-weight:500;line-height:16px;text-decoration:none;">PDF</a>
               </td>
               <td width="6"></td>
               <td align="center" style="background-color:#1A1A1A;border-radius:6px;padding:6px 12px;">
-                <a href="${downloadBase}/txt" style="color:#FFFFFF;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:12px;font-weight:500;line-height:16px;text-decoration:none;">TXT</a>
+                <a href="${downloadBase}/txt?token=${token}" style="color:#FFFFFF;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:12px;font-weight:500;line-height:16px;text-decoration:none;">TXT</a>
               </td>
               <td width="6"></td>
               <td align="center" style="background-color:#1A1A1A;border-radius:6px;padding:6px 12px;">
-                <a href="${downloadBase}/docx" style="color:#FFFFFF;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:12px;font-weight:500;line-height:16px;text-decoration:none;">Word</a>
+                <a href="${downloadBase}/docx?token=${token}" style="color:#FFFFFF;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:12px;font-weight:500;line-height:16px;text-decoration:none;">Word</a>
               </td>
             </tr>
           </table>
@@ -83,12 +95,12 @@ function buildNotesEmailHtml({
   sessionStartTime,
   sessionEndTime,
   notes,
-}: Omit<SendNotesEmailRequest, "to" | "cc">) {
+  baseUrl,
+}: Omit<SendNotesEmailRequest, "to" | "cc"> & { baseUrl: string }) {
   const sessionTimeRange = `${sessionStartTime}${sessionEndTime ? " &mdash; " + sessionEndTime : ""}`;
-  const noteCards = notes.map(buildNoteCardHtml).join("\n");
+  const noteCards = notes.map((n) => buildNoteCardHtml(n, baseUrl)).join("\n");
 
   return emailTemplate
-    .replaceAll("{{baseUrl}}", BASE_URL)
     .replaceAll("{{sessionDate}}", sessionDate)
     .replaceAll("{{sessionTimeRange}}", sessionTimeRange)
     .replaceAll("{{noteCards}}", noteCards);
@@ -101,12 +113,14 @@ export async function sendNotesEmail({
   sessionStartTime,
   sessionEndTime,
   notes,
-}: SendNotesEmailRequest) {
+  baseUrl,
+}: SendNotesEmailRequest & { baseUrl: string }) {
   const html = buildNotesEmailHtml({
     sessionDate,
     sessionStartTime,
     sessionEndTime,
     notes,
+    baseUrl,
   });
 
   const ccList = cc ? (Array.isArray(cc) ? cc : [cc]).filter(Boolean) : undefined;
@@ -159,10 +173,10 @@ function buildTranscriptRowsHtml(segments: TranscriptEmailSegment[]): string {
       return `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="${borderStyle}">
   <tr>
     <td style="padding:12px 0;vertical-align:top;width:42px;">
-      <span style="color:#999999;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13px;font-weight:500;line-height:16px;">${seg.timestamp}</span>
+      <span style="color:#999999;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13px;font-weight:500;line-height:16px;">${escapeHtml(seg.timestamp)}</span>
     </td>
     <td style="padding:12px 0;vertical-align:top;">
-      <span style="color:#3A3A3A;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14px;line-height:21px;">${seg.text}</span>
+      <span style="color:#3A3A3A;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14px;line-height:21px;">${escapeHtml(seg.text)}</span>
     </td>
   </tr>
 </table>`;
@@ -176,15 +190,22 @@ function buildTranscriptEmailHtml({
   sessionStartTime,
   sessionEndTime,
   segments,
-}: Omit<SendTranscriptEmailRequest, "to">) {
-  const downloadBase = `${BASE_URL}/api/transcripts/${transcriptId}/download`;
+  baseUrl,
+}: Omit<SendTranscriptEmailRequest, "to"> & { baseUrl: string }) {
+  const token = generateDownloadToken(transcriptId);
+  const downloadBase = `${baseUrl}/api/transcripts/${transcriptId}/download`;
+  const downloadPdf = `${downloadBase}/pdf?token=${token}`;
+  const downloadTxt = `${downloadBase}/txt?token=${token}`;
+  const downloadDocx = `${downloadBase}/docx?token=${token}`;
   const sessionTimeRange = `${sessionStartTime}${sessionEndTime ? " &mdash; " + sessionEndTime : ""}`;
   const transcriptRows = buildTranscriptRowsHtml(segments);
 
   return transcriptTemplate
     .replaceAll("{{sessionDate}}", sessionDate)
     .replaceAll("{{sessionTimeRange}}", sessionTimeRange)
-    .replaceAll("{{downloadBase}}", downloadBase)
+    .replaceAll("{{downloadPdf}}", downloadPdf)
+    .replaceAll("{{downloadTxt}}", downloadTxt)
+    .replaceAll("{{downloadDocx}}", downloadDocx)
     .replaceAll("{{transcriptRows}}", transcriptRows);
 }
 
@@ -196,13 +217,15 @@ export async function sendTranscriptEmail({
   sessionStartTime,
   sessionEndTime,
   segments,
-}: SendTranscriptEmailRequest) {
+  baseUrl,
+}: SendTranscriptEmailRequest & { baseUrl: string }) {
   const html = buildTranscriptEmailHtml({
     transcriptId,
     sessionDate,
     sessionStartTime,
     sessionEndTime,
     segments,
+    baseUrl,
   });
 
   const ccList = cc ? (Array.isArray(cc) ? cc : [cc]).filter(Boolean) : undefined;

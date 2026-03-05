@@ -33,6 +33,8 @@ import { Drawer } from "vaul";
 import { useSynced } from "../../hooks/useSynced";
 import type { SessionI, Note } from "../../../shared/types";
 import { NotePageSkeleton } from "../../components/shared/SkeletonLoader";
+import { EmailDrawer } from "../../components/shared/EmailDrawer";
+import { rewriteR2Urls } from "../../../shared/constants";
 
 export function NotePage() {
   const params = useParams<{ id: string }>();
@@ -42,6 +44,7 @@ export function NotePage() {
 
   const [editTitle, setEditTitle] = useState("");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showEmailDrawer, setShowEmailDrawer] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showSaved, setShowSaved] = useState(false);
@@ -131,10 +134,7 @@ export function NotePage() {
 
   // Rewrite private R2 URLs to public URLs in HTML content
   const rewritePhotoUrls = useCallback((html: string): string => {
-    return html.replaceAll(
-      "https://3c764e987404b8a1199ce5fdc3544a94.r2.cloudflarestorage.com/mentra-notes/",
-      "https://pub-b5f134142a0f4fbdb5c05a2f75fc8624.r2.dev/",
-    );
+    return rewriteR2Urls(html);
   }, []);
 
   // Build editor content from note
@@ -280,6 +280,44 @@ export function NotePage() {
     }
   };
 
+  const handleEmailSend = useCallback(async (to: string, cc: string) => {
+    if (!note) return;
+    const ccList = cc ? cc.split(",").filter(Boolean) : undefined;
+    const dateStr = note.date || "";
+    const noteDate = dateStr ? new Date(dateStr + "T00:00:00") : new Date();
+    const sessionDate = noteDate.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+    const createdAt = note.createdAt ? new Date(note.createdAt) : new Date();
+    const noteTimestamp = createdAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+    const startTime = note.transcriptRange?.startTime
+      ? new Date(note.transcriptRange.startTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
+      : noteTimestamp;
+    const endTime = note.transcriptRange?.endTime
+      ? new Date(note.transcriptRange.endTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
+      : "";
+
+    const res = await fetch("/api/email/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        to,
+        cc: ccList,
+        sessionDate,
+        sessionStartTime: startTime,
+        sessionEndTime: endTime,
+        notes: [{
+          noteId: note.id,
+          noteTimestamp,
+          noteTitle: editTitle || note.title,
+          noteContent: editor?.getHTML() || note.content,
+          noteType: note.isAIGenerated ? "AI Generated" : "Manual",
+        }],
+      }),
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || "Failed to send email");
+  }, [note, editTitle, editor]);
+
   const handleDelete = async () => {
     if (!session?.notes?.deleteNote) return;
 
@@ -386,51 +424,9 @@ export function NotePage() {
                 />
                 <div className="absolute right-0 top-full mt-1 z-50 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-lg py-1 min-w-40">
                   <button
-                    onClick={async () => {
+                    onClick={() => {
                       setShowMenu(false);
-                      if (!note) return;
-                      const dateStr = note.date || "";
-                      const noteDate = dateStr ? new Date(dateStr + "T00:00:00") : new Date();
-                      const sessionDate = noteDate.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
-                      const createdAt = note.createdAt ? new Date(note.createdAt) : new Date();
-                      const noteTimestamp = createdAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
-                      const startTime = note.transcriptRange?.startTime
-                        ? new Date(note.transcriptRange.startTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
-                        : noteTimestamp;
-                      const endTime = note.transcriptRange?.endTime
-                        ? new Date(note.transcriptRange.endTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
-                        : "";
-                      const title = editTitle || note.title;
-                      const content = editor?.getHTML() || note.content;
-                      console.log("[Email] Sending:", { title, contentLength: content?.length });
-                      if (!title || !content) {
-                        alert("Note has no title or content to send");
-                        return;
-                      }
-                      try {
-                        const res = await fetch("/api/email/send", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          credentials: "include",
-                          body: JSON.stringify({
-                            to: userId || "",
-                            sessionDate,
-                            sessionStartTime: startTime,
-                            sessionEndTime: endTime,
-                            notes: [{
-                              noteId: note.id,
-                              noteTimestamp,
-                              noteTitle: editTitle || note.title,
-                              noteContent: editor?.getHTML() || note.content,
-                              noteType: note.isAIGenerated ? "AI Generated" : "Manual",
-                            }],
-                          }),
-                        });
-                        const data = await res.json();
-                        alert(data.success ? "Email sent!" : "Failed: " + data.error);
-                      } catch {
-                        alert("Error sending email");
-                      }
+                      setShowEmailDrawer(true);
                     }}
                     className="w-full px-4 py-2.5 text-left text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-3"
                   >
@@ -537,6 +533,15 @@ export function NotePage() {
           </Drawer.Content>
         </Drawer.Portal>
       </Drawer.Root>
+
+      {/* Email Drawer */}
+      <EmailDrawer
+        isOpen={showEmailDrawer}
+        onClose={() => setShowEmailDrawer(false)}
+        onSend={handleEmailSend}
+        defaultEmail={userId || ""}
+        itemLabel="Note"
+      />
     </div>
   );
 }
