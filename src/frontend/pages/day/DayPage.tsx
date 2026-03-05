@@ -428,7 +428,7 @@ export function DayPage() {
             <button
               onClick={toggleStar}
               className={clsx(
-                "py-2 rounded-lg transition-colors  w-[60px] flex justify-end items-end pr-[24px] ",
+                `py-2 rounded-lg transition-colors  w-[60px] flex justify-end items-end ${isToday? "pr-6" : ""}`,
                 isStarred
                   ? "text-yellow-500"
                   : "text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300",
@@ -436,58 +436,42 @@ export function DayPage() {
             >
               <Star size={20} fill={isStarred ? "currentColor" : "none"} />
             </button>
-            <DropdownMenu
-              options={
-                [
-                  {
-                    id: "send-transcript",
-                    label: "Send Transcript",
-                    icon: Mail,
-                    onClick: () => {
-                      if (daySegments.length === 0) {
-                        alert("No transcript segments to send");
-                        return;
-                      }
-                      setEmailDrawerAction("send-transcript");
-                      setShowEmailDrawer(true);
+            {!isToday && (
+              <DropdownMenu
+                options={
+                  [
+                    {
+                      id: "archive",
+                      label: isArchived ? "Unarchive" : "Archive",
+                      icon: isArchived ? ArchiveRestore : Archive,
+                      onClick: () => {
+                        if (!session?.file) return;
+                        if (isArchived) {
+                          session.file.unarchiveFile(dateString);
+                        } else {
+                          session.file.archiveFile(dateString);
+                        }
+                      },
                     },
-                  },
-                  ...(!isToday
-                    ? [
-                        { type: "divider" } as const,
-                        {
-                          id: "archive",
-                          label: isArchived ? "Unarchive" : "Archive",
-                          icon: isArchived ? ArchiveRestore : Archive,
-                          onClick: () => {
-                            if (!session?.file) return;
-                            if (isArchived) {
-                              session.file.unarchiveFile(dateString);
-                            } else {
-                              session.file.archiveFile(dateString);
-                            }
-                          },
-                        },
-                        { type: "divider" } as const,
-                        {
-                          id: "trash",
-                          label: isTrashed ? "Restore" : "Move to Trash",
-                          icon: isTrashed ? RotateCcw : Trash2,
-                          danger: !isTrashed,
-                          onClick: () => {
-                            if (!session?.file) return;
-                            if (isTrashed) {
-                              session.file.restoreFile(dateString);
-                            } else {
-                              session.file.trashFile(dateString);
-                            }
-                          },
-                        },
-                      ]
-                    : []),
-                ] as DropdownMenuOption[]
-              }
-            />
+                    { type: "divider" } as const,
+                    {
+                      id: "trash",
+                      label: isTrashed ? "Restore" : "Move to Trash",
+                      icon: isTrashed ? RotateCcw : Trash2,
+                      danger: !isTrashed,
+                      onClick: () => {
+                        if (!session?.file) return;
+                        if (isTrashed) {
+                          session.file.restoreFile(dateString);
+                        } else {
+                          session.file.trashFile(dateString);
+                        }
+                      },
+                    },
+                  ] as DropdownMenuOption[]
+                }
+              />
+            )}
           </div>
         </div>
 

@@ -411,7 +411,7 @@ export function NotePage() {
           <div className="relative">
             <button
               onClick={() => setShowMenu(!showMenu)}
-              className="p-2 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors"
+              className="p-2 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors "
             >
               <MoreHorizontal size={20} />
             </button>
