@@ -716,8 +716,8 @@ api.post("/email/send", authMiddleware, async (c) => {
 
     // Validate each note item
     for (const note of notes) {
-      if (!note.noteId || !note.noteTitle || typeof note.noteContent !== "string") {
-        return c.json({ error: "Each note must have noteId, noteTitle, and noteContent" }, 400);
+      if (!note.noteId || typeof note.noteContent !== "string") {
+        return c.json({ error: "Each note must have noteId and noteContent" }, 400);
       }
     }
 
