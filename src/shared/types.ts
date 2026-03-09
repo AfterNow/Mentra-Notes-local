@@ -59,6 +59,34 @@ export interface HourSummary {
   updatedAt: Date;
 }
 
+// =============================================================================
+// Auto-Notes / Conversation Types
+// =============================================================================
+
+export type ConversationStatus = "active" | "paused" | "ended";
+
+export interface ConversationChunk {
+  id: string;
+  text: string;
+  startTime: Date;
+  endTime: Date;
+  wordCount: number;
+}
+
+export interface Conversation {
+  id: string;
+  userId: string;
+  date: string;
+  title: string;
+  status: ConversationStatus;
+  startTime: Date;
+  endTime: Date | null;
+  runningSummary: string;
+  aiSummary: string;
+  generatingSummary: boolean;
+  chunks: ConversationChunk[];
+}
+
 /**
  * Display modes for glasses
  */
@@ -175,6 +203,15 @@ export interface FileCounts {
   favourites: number;
 }
 
+export interface ConversationManagerI {
+  // State
+  conversations: Conversation[];
+  activeConversationId: string | null;
+
+  // RPCs
+  deleteConversation(conversationId: string): Promise<void>;
+}
+
 export interface FileManagerI {
   // State
   files: FileData[];
@@ -216,6 +253,7 @@ export interface SessionI {
   chat: ChatManagerI;
   settings: SettingsManagerI;
   file: FileManagerI;
+  conversation: ConversationManagerI;
 }
 
 // =============================================================================

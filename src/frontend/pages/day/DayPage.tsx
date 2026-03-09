@@ -19,6 +19,7 @@ import {
   Star,
   FileText,
   MessageSquare,
+  MessagesSquare,
   // Headphones, // TODO: Enable when audio feature is implemented
   Sparkles,
   Archive,
@@ -41,6 +42,7 @@ import type {
 } from "../../../shared/types";
 import { NotesTab } from "./components/tabs/NotesTab";
 import { TranscriptTab } from "./components/tabs/TranscriptTab";
+import { ConversationsTab } from "./components/tabs/ConversationsTab";
 // import { AudioTab } from "./components/tabs/AudioTab"; // TODO: Enable when audio feature is implemented
 import { AITab } from "./components/tabs/AITab";
 import { TranscribingIndicator } from "../../components/shared/TranscribingIndicator";
@@ -52,7 +54,7 @@ import { EmailDrawer } from "../../components/shared/EmailDrawer";
 import { DayPageSkeleton } from "../../components/shared/SkeletonLoader";
 import { useFeatureFlag } from "../../lib/posthog";
 
-type TabType = "notes" | "transcript" | "audio" | "ai";
+type TabType = "notes" | "transcript" | "conversations" | "audio" | "ai";
 
 interface TabConfig {
   id: TabType;
@@ -62,6 +64,7 @@ interface TabConfig {
 
 const tabs: TabConfig[] = [
   { id: "transcript", label: "Transcript", icon: MessageSquare },
+  { id: "conversations", label: "Conversations", icon: MessagesSquare },
   { id: "notes", label: "Notes", icon: FileText },
   // { id: "audio", label: "Audio", icon: Headphones }, // TODO: Enable when audio feature is implemented
   // { id: "ai", label: "AI", icon: Sparkles },
@@ -160,6 +163,7 @@ export function DayPage() {
   const isSyncingPhoto = session?.transcript?.isSyncingPhoto ?? false;
   const loadedDate = session?.transcript?.loadedDate ?? "";
   const files = session?.file?.files ?? [];
+  const conversations = session?.conversation?.conversations ?? [];
 
   // Data is loading when the server hasn't confirmed this date's data yet.
   // loadedDate is the source of truth for which date's segments are loaded.
@@ -642,6 +646,13 @@ export function DayPage() {
                 isCompactMode={isCompactMode}
                 isSyncingPhoto={isToday ? isSyncingPhoto : false}
                 isLoading={isDataLoading}
+              />
+            )}
+            {activeTab === "conversations" && (
+              <ConversationsTab
+                conversations={conversations}
+                isLoading={isDataLoading}
+                onDeleteConversation={(id) => session?.conversation?.deleteConversation(id)}
               />
             )}
             {/* {activeTab === "audio" && <AudioTab />} */}

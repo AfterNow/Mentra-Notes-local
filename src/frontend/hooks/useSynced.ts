@@ -98,10 +98,10 @@ class SyncClient<T> {
         break;
 
       case "state_change":
-        console.log(
-          `[Synced] state_change: ${message.manager}.${message.property} =`,
-          message.value,
-        );
+        // console.log(
+        //   `[Synced] state_change: ${message.manager}.${message.property} =`,
+        //   message.value,
+        // );
         // For session-level state (hasGlassesConnected, isRecording, etc.),
         // store at top level to match snapshot format
         if (message.manager === "session") {

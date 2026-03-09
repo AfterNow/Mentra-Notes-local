@@ -19,6 +19,8 @@ import {
   CloudflareR2Manager,
   FileManager,
   PhotoManager,
+  ChunkBufferManager,
+  ConversationManager,
 } from "./managers";
 import { InputManager } from "./managers/InputManager";
 import { createUserState } from "../services/userState.service";
@@ -37,9 +39,12 @@ export class NotesSession extends SyncedSession {
   @manager file = new FileManager();
   @manager photo = new PhotoManager();
   @manager input = new InputManager();
+  @manager chunkBuffer = new ChunkBufferManager();
+  @manager conversation = new ConversationManager();
 
   // MentraOS AppSession - null if no glasses connected (not synced)
   private _appSession: AppSession | null = null;
+  private _pipelineWired = false;
 
   // ===========================================================================
   // Client Connection - Refresh FileManager on connect
@@ -51,9 +56,13 @@ export class NotesSession extends SyncedSession {
    */
   addClient(ws: any): void {
     super.addClient(ws);
-    // Note: FileManager is hydrated once during session creation.
-    // We no longer re-hydrate on every client connect to avoid
-    // race conditions with user filter selections.
+
+    // Wire auto-notes pipeline on first client connect (after all managers hydrated)
+    if (!this._pipelineWired) {
+      this._pipelineWired = true;
+      this.conversation.wireChunkBuffer(this.chunkBuffer);
+      console.log(`[NotesSession] Auto-notes pipeline wired for ${this.userId}`);
+    }
   }
 
   // ===========================================================================
@@ -126,6 +135,7 @@ export class NotesSession extends SyncedSession {
 
     // Reset recording state since glasses are disconnected
     this.transcript.stopRecording();
+    this.chunkBuffer.stop();
 
     console.log(
       `[NotesSession] Glasses disconnected for ${this.userId} - headless mode`,
@@ -144,6 +154,14 @@ export class NotesSession extends SyncedSession {
   onTranscription(text: string, isFinal: boolean, speakerId?: string): void {
     // Add to transcript
     this.transcript.addSegment(text, isFinal, speakerId);
+
+    // Track speaking state — interim results mean user is mid-sentence
+    this.chunkBuffer.markSpeaking(!isFinal);
+
+    // Feed final segments into the auto-notes chunk buffer
+    if (isFinal && text.trim()) {
+      this.chunkBuffer.addText(text);
+    }
 
     // Show on glasses display based on display mode
     if (this._appSession) {

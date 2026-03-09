@@ -203,6 +203,100 @@ The system listens to a continuous transcript stream, classifies chunks as meani
 
 ---
 
+### Phase 4B: Frontend — "Conversations" Tab
+
+**Goal:** Surface auto-detected conversations in a dedicated tab on the DayPage, with real-time status indicators.
+
+#### Step 4B.1 — Add Shared Types
+
+- Add to `src/shared/types.ts`:
+  ```typescript
+  interface Conversation {
+    id: string;
+    userId: string;
+    date: string;
+    title: string;
+    status: 'active' | 'paused' | 'ended';
+    startTime: Date;
+    endTime: Date | null;
+    runningSummary: string;
+    chunks: ConversationChunk[];
+    note: Note | null; // populated after note generation
+    generatingNote: boolean; // true while LLM is producing the note
+  }
+
+  interface ConversationChunk {
+    id: string;
+    text: string;
+    startTime: Date;
+    endTime: Date;
+    wordCount: number;
+  }
+  ```
+- Add `ConversationManagerI` interface:
+  ```typescript
+  interface ConversationManagerI {
+    state: {
+      conversations: Conversation[];
+      activeConversationId: string | null;
+    };
+  }
+  ```
+
+#### Step 4B.2 — Create Backend ConversationManager
+
+- New file: `src/backend/session/managers/ConversationManager.ts`
+- Exposes conversations for the current day via `@ballah/synced`
+- Syncs state to frontend in real-time:
+  - When `ConversationTracker` starts a new conversation → push to `conversations` array, set `activeConversationId`
+  - When new chunks arrive → append to active conversation's `chunks`
+  - When conversation is paused/ended → update `status`
+  - When note generation starts → set `generatingNote: true`
+  - When note generation finishes → attach `note`, set `generatingNote: false`
+- Wire into `NotesSession.ts` alongside existing managers
+
+#### Step 4B.3 — Add "Conversations" Tab to DayPage
+
+- Modify `src/frontend/pages/day/DayPage.tsx`:
+  - Add to `TabType`: `"conversations"`
+  - Add to `tabs` array: `{ id: "conversations", label: "Conversations", icon: MessagesSquare }`
+  - Place between Transcript and Notes tabs (order: Transcript, Conversations, Notes)
+- Access data: `const conversations = session?.conversation?.conversations ?? [];`
+
+#### Step 4B.4 — Create ConversationsTab Component
+
+- New file: `src/frontend/pages/day/components/tabs/ConversationsTab.tsx`
+- **List view:** Shows conversation cards for the selected day, ordered by startTime (newest first)
+- **Each card shows:**
+  - Title (or "Untitled Conversation" while active/before note generation)
+  - Time range (e.g., "2:14 PM – 2:38 PM")
+  - Status badge: "Live" (green pulse) / "Paused" / "Ended"
+  - Summary preview (first ~120 chars of runningSummary or note summary)
+- **Tap a card → expand inline or navigate to detail view showing:**
+  - **Section 1: Summary** — the full structured note (title, participants, summary, key points, decisions, action items)
+  - **Section 2: Full Transcript** — all chunks concatenated in order with timestamps
+- **Empty state:** Friendly message like "No conversations detected yet today"
+
+#### Step 4B.5 — Real-Time "Generating Note" Status Bar
+
+- When a conversation ends and note generation begins, show a **status banner** at the top of the Conversations tab:
+  - Banner text: "Generating conversation note..." with a subtle loading animation
+  - Stays visible while `generatingNote: true` on any conversation
+  - Disappears once the note is attached
+- Also show inline on the conversation card itself: replace the status badge with "Generating note..." indicator
+- This gives the user immediate feedback that the system detected something and is processing it
+
+#### Step 4B.6 — Active Conversation Live Indicator
+
+- While a conversation is `active` (being tracked in real-time):
+  - The card has a green "Live" badge with a subtle pulse animation
+  - The running summary updates in real-time as new chunks come in
+  - The transcript section (if expanded) shows chunks appearing live
+- While `paused`: show an amber "Paused" badge — the system is waiting to see if the conversation resumes
+- This makes the whole pipeline visible to the user — they can see the system is listening and deciding
+
+---
+
 ### Phase 5: Safety Pass (Stage 5) — DO LATER, ONLY IF NEEDED
 
 **Goal:** End-of-day review to catch missed conversations and discard false positives.
@@ -258,18 +352,46 @@ src/backend/
 │       └── SafetyPass.ts              (Phase 5)
 └── session/
     └── managers/
-        └── ChunkBufferManager.ts       (Phase 1)
+        ├── ChunkBufferManager.ts       (Phase 1)
+        └── ConversationManager.ts      (Phase 4B)
+
+src/frontend/
+└── pages/
+    └── day/
+        └── components/
+            └── tabs/
+                └── ConversationsTab.tsx (Phase 4B)
 ```
 
 ## Files to Modify
 
 ```
-src/backend/session/NotesSession.ts     — instantiate ChunkBufferManager, wire pipeline
-src/backend/models/note.model.ts        — add feedback fields, auto-note type
-src/backend/models/user-settings.model.ts — add domain context profile
-src/shared/types.ts                     — add new types for chunks, conversations, feedback
-src/frontend/ (NoteCard, DayPage)       — auto badge + feedback buttons (Phase 6)
+src/backend/session/NotesSession.ts        — instantiate ChunkBufferManager + ConversationManager, wire pipeline
+src/backend/models/note.model.ts           — add feedback fields, auto-note type
+src/backend/models/user-settings.model.ts  — add domain context profile
+src/shared/types.ts                        — add Conversation, ConversationChunk, ConversationManagerI types
+src/frontend/pages/day/DayPage.tsx         — add "Conversations" tab to TabType and tabs array
+src/frontend/ (NoteCard, DayPage)          — auto badge + feedback buttons (Phase 6)
 ```
+
+---
+
+## Edge Cases & Risks to Handle
+
+### 1. Sentence Boundary — Max Wait Cap
+The buffer waits for a sentence to finish at the 40s mark, but a long rambling sentence could delay the chunk indefinitely. **Cap the wait at 10 extra seconds** (50s max chunk). If the sentence still isn't done, cut it — the next chunk will pick up the remainder.
+
+### 2. Server Crash Recovery
+The `ConversationTracker` state machine lives in memory. If the server restarts mid-conversation, that state is lost. **On startup:** check DB for conversations with `status: 'active'` or `status: 'paused'` for this user. Reconstruct tracker state from the conversation document (runningSummary, chunkIds, pausedAt) and resume tracking.
+
+### 3. Resumption — Only Resume Paused, Not Ended
+The resumption window (30 min) should only apply to `status: 'paused'` conversations. A conversation that reached `ended` (3 consecutive silent chunks / 2 minutes of silence) should stay ended. Creating a new conversation is the correct behavior in that case.
+
+### 4. Chunk Retention Cleanup
+Configurable parameter says 24-hour retention, but no cleanup job is defined. **Add a daily cleanup task** (can run alongside the Safety Pass or as a separate scheduled job) that deletes chunks older than the retention window. Conversations and their notes persist — only raw chunks are cleaned up.
+
+### 5. Note Generation Failure
+If the LLM call for note generation fails (timeout, rate limit, etc.): retry once after 5 seconds. If it still fails, mark the conversation with `noteGenerationFailed: true` and log it. The user sees a "Note generation failed" state on the card. Provide a manual "Retry" button in the frontend.
 
 ---
 
