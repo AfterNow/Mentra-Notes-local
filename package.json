@@ -16,7 +16,11 @@
     "test:eval:triage:easy": "EVAL_DIFFICULTY=easy bun test src/test/evals/triage/triage-classifier.test.ts",
     "test:eval:triage:medium": "EVAL_DIFFICULTY=medium bun test src/test/evals/triage/triage-classifier.test.ts",
     "test:eval:triage:hard": "EVAL_DIFFICULTY=hard bun test src/test/evals/triage/triage-classifier.test.ts",
-    "test:eval:triage:realistic": "EVAL_DIFFICULTY=realistic bun test src/test/evals/triage/triage-classifier.test.ts"
+    "test:eval:triage:realistic": "EVAL_DIFFICULTY=realistic bun test src/test/evals/triage/triage-classifier.test.ts",
+    "test:eval:tracker": "bun test src/test/evals/conversation-tracker/conversation-tracker.test.ts",
+    "test:eval:tracker:context": "EVAL_TYPE=context bun test src/test/evals/conversation-tracker/conversation-tracker.test.ts",
+    "test:eval:tracker:resumption": "EVAL_TYPE=resumption bun test src/test/evals/conversation-tracker/conversation-tracker.test.ts",
+    "test:eval:tracker:summary": "EVAL_TYPE=summary bun test src/test/evals/conversation-tracker/conversation-tracker.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.35.0",

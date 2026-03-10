@@ -14,7 +14,10 @@
  */
 
 import type { TranscriptChunkI } from "../../models/transcript-chunk.model";
-import { updateChunkClassification } from "../../models/transcript-chunk.model";
+import {
+  updateChunkClassification,
+  getRecentChunks,
+} from "../../models/transcript-chunk.model";
 import {
   createConversation,
   getResumableConversations,
@@ -266,15 +269,56 @@ export class ConversationTracker {
   private async startNewConversation(
     chunk: TranscriptChunkI,
   ): Promise<void> {
+    // Pull preceding chunks as context preamble
+    const preambleCount = AUTO_NOTES_CONFIG.CONTEXT_PREAMBLE_CHUNKS;
+    const recentChunks = await getRecentChunks(
+      chunk.userId,
+      chunk.date,
+      preambleCount + 1, // +1 because the current chunk may be included
+    );
+
+    // Filter out the current chunk and any already assigned to another conversation
+    const preambleChunks = recentChunks.filter(
+      (c) =>
+        c._id?.toString() !== chunk._id?.toString() &&
+        !c.conversationId,
+    ).slice(-preambleCount); // Take the most recent N
+
+    // Use the earliest preamble chunk's startTime as conversation start
+    const startTime = preambleChunks.length > 0
+      ? preambleChunks[0].startTime
+      : chunk.startTime;
+
     const conversation = await createConversation({
       userId: chunk.userId,
       date: chunk.date,
-      startTime: chunk.startTime,
+      startTime,
     });
 
     this.activeConversation = conversation;
     this.state = "TRACKING";
 
+    // Add preamble chunks first (preserves chronological order in transcript)
+    for (const preamble of preambleChunks) {
+      await appendChunkToConversation(
+        conversation._id!.toString(),
+        preamble._id!.toString(),
+      );
+      await updateChunkClassification(
+        preamble._id!.toString(),
+        preamble.classification as any,
+        conversation._id!.toString(),
+      );
+      conversation.chunkIds.push(preamble._id!.toString());
+    }
+
+    if (preambleChunks.length > 0) {
+      console.log(
+        `[ConversationTracker] Added ${preambleChunks.length} preamble chunks as context`,
+      );
+    }
+
+    // Add the triggering meaningful chunk
     await this.addChunkToConversation(chunk);
 
     console.log(

@@ -204,7 +204,7 @@ export class ConversationManager extends SyncedManager {
 
       const prompt = `You are summarizing a conversation captured from smart glasses. Respond with EXACTLY this format:
 
-TITLE: <a short, descriptive title for the conversation, max 8 words>
+TITLE: <a short, descriptive title for the conversation, max 5 words>
 
 <1-2 sentence overview of what was discussed>
 

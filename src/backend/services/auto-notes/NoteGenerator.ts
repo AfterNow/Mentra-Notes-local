@@ -126,7 +126,7 @@ ${transcript}
 
 Generate a structured note with the following sections. Use markdown formatting:
 
-# [Title - short, descriptive title for this conversation]
+# [Title - max 5 words, descriptive]
 
 ## Participants
 [List speakers if identifiable, otherwise "Speaker 1, Speaker 2, etc."]

@@ -33,6 +33,9 @@ export const AUTO_NOTES_CONFIG = {
   // Phase 3: Conversation Tracking
   // =========================================================================
 
+  /** Number of preceding chunks to pull into a new conversation as context */
+  CONTEXT_PREAMBLE_CHUNKS: 3,
+
   /** 1 silent/filler chunk → pause the conversation */
   SILENCE_PAUSE_CHUNKS: 1,
 
