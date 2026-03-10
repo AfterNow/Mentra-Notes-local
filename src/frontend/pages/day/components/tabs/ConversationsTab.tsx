@@ -7,14 +7,16 @@
  * - Empty state when no conversations detected
  */
 
-import { useState, useMemo } from "react";
+import { useState, useRef, useMemo } from "react";
 import { clsx } from "clsx";
+import { AnimatePresence, motion, useMotionValue, useTransform, animate, type PanInfo } from "motion/react";
 import {
   MessagesSquare,
   ChevronDown,
   ChevronUp,
   Trash2,
   Loader2,
+  Sparkles,
 } from "lucide-react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -81,19 +83,28 @@ export function ConversationsTab({
     <div className="h-full overflow-y-auto">
       <div className="p-4 pt-4 space-y-3">
         {/* Conversation cards */}
-        {conversations.map((conversation) => (
-          <ConversationCard
-            key={conversation.id}
-            conversation={conversation}
-            isExpanded={expandedId === conversation.id}
-            onToggle={() =>
-              setExpandedId(
-                expandedId === conversation.id ? null : conversation.id,
-              )
-            }
-            onDelete={onDeleteConversation}
-          />
-        ))}
+        <AnimatePresence initial={false}>
+          {conversations.map((conversation) => (
+            <motion.div
+              key={conversation.id}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.25 }}
+            >
+              <ConversationCard
+                conversation={conversation}
+                isExpanded={expandedId === conversation.id}
+                onToggle={() =>
+                  setExpandedId(
+                    expandedId === conversation.id ? null : conversation.id,
+                  )
+                }
+                onDelete={onDeleteConversation}
+              />
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </div>
     </div>
   );
@@ -119,6 +130,9 @@ function ConversationCard({
   const [activeSection, setActiveSection] = useState<"summary" | "transcript">(
     "summary",
   );
+  const x = useMotionValue(0);
+  const deleteOpacity = useTransform(x, [-120, -60], [1, 0]);
+  const isDragging = useRef(false);
 
   const timeRange = formatTimeRange(
     conversation.startTime,
@@ -131,27 +145,68 @@ function ConversationCard({
       ? previewText.substring(0, 120) + "..."
       : previewText;
 
+  const snapBackTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleDragEnd = (_: unknown, info: PanInfo) => {
+    if (info.offset.x < -100 && onDelete) {
+      // Slide card off-screen, then delete
+      animate(x, -window.innerWidth, { duration: 0.25, ease: "easeIn" }).then(() => {
+        onDelete(conversation.id);
+      });
+    } else {
+      // Stay in place briefly, then slide back smoothly
+      if (snapBackTimeout.current) clearTimeout(snapBackTimeout.current);
+      snapBackTimeout.current = setTimeout(() => {
+        x.set(0);
+      }, 1500);
+    }
+  };
+
   return (
-    <div className="rounded-xl bg-zinc-50 dark:bg-zinc-900 overflow-hidden">
+    <div className="relative rounded-xl overflow-hidden">
+      {/* Delete background */}
+      {onDelete && (
+        <motion.div
+          className="absolute inset-0 bg-linear-to-r from-transparent from-70% to-red-100 dark:to-red-950 rounded-xl flex items-center justify-end pr-5"
+          style={{ opacity: deleteOpacity }}
+        >
+          <Trash2 size={18} className="text-red-400 dark:text-red-400" />
+        </motion.div>
+      )}
+
+      <motion.div
+        style={{ x }}
+        drag={onDelete ? "x" : false}
+        dragConstraints={{ left: 0, right: 0 }}
+        dragElastic={{ left: 0.5, right: 0 }}
+        onDragStart={() => { isDragging.current = true; }}
+        onDragEnd={(_, info) => {
+          isDragging.current = false;
+          handleDragEnd(_, info);
+        }}
+        className="relative rounded-xl bg-zinc-50 dark:bg-zinc-900 overflow-hidden">
       {/* Card header — always visible */}
       <div
         role="button"
         tabIndex={0}
-        onClick={onToggle}
+        onClick={() => { if (!isDragging.current) onToggle(); }}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(); } }}
         className="w-full text-left p-4 flex flex-col gap-2 cursor-pointer"
       >
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
             <h3 className="text-sm font-medium text-zinc-900 dark:text-white truncate flex items-center gap-1.5">
-              {conversation.title || (
-                conversation.status === "ended" && !conversation.generatingSummary
+              {conversation.title
+                ? conversation.title
+                : conversation.status === "ended" && !conversation.generatingSummary && !conversation.aiSummary
                   ? "Untitled Conversation"
                   : <>
                       <Loader2 size={12} className="animate-spin text-zinc-400 shrink-0" />
-                      <span className="text-zinc-400">Generating...</span>
+                      <span className="text-zinc-400">
+                        {conversation.generatingSummary ? "Generating title..." : "Capturing Conversation..."}
+                      </span>
                     </>
-              )}
+              }
             </h3>
             <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
               {timeRange}
@@ -213,20 +268,9 @@ function ConversationCard({
             )}
           </div>
 
-          {/* Delete action */}
-          {onDelete && (
-            <div className="border-t border-zinc-200 dark:border-zinc-800 px-4 py-2.5">
-              <button
-                onClick={() => onDelete(conversation.id)}
-                className="flex items-center gap-1.5 text-xs text-red-500 hover:text-red-600 transition-colors"
-              >
-                <Trash2 size={12} />
-                Delete conversation
-              </button>
-            </div>
-          )}
         </div>
       )}
+      </motion.div>
     </div>
   );
 }
@@ -333,22 +377,27 @@ function SummarySection({
   // Generating AI summary
   if (conversation.generatingSummary) {
     return (
-      <div className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
-        <Loader2 size={14} className="animate-spin" />
-        Generating summary...
+      <div className="flex flex-col items-center justify-center py-6 gap-3">
+        <div className="w-9 h-9 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
+          <Sparkles size={16} className="animate-pulse text-zinc-400 dark:text-zinc-500" />
+        </div>
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          Generating summary...
+        </p>
       </div>
     );
   }
 
-  // Fallback to running summary (live/paused conversations)
-  if (conversation.runningSummary) {
-    return <ReadOnlyTiptap content={conversation.runningSummary} />;
-  }
-
+  // Live/paused — show waiting message (summary generates after conversation ends)
   return (
-    <p className="text-sm text-zinc-500 dark:text-zinc-400">
-      Summary will be available once the conversation ends.
-    </p>
+    <div className="flex flex-col items-center justify-center py-6 gap-3">
+      <div className="w-9 h-9 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
+        <Sparkles size={16} className="text-zinc-400 dark:text-zinc-500" />
+      </div>
+      <p className="text-sm text-zinc-500 dark:text-zinc-400 text-center">
+        Summary will be generated when the conversation ends.
+      </p>
+    </div>
   );
 }
 

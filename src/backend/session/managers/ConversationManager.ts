@@ -77,15 +77,51 @@ export class ConversationManager extends SyncedManager {
       });
 
       this.conversationTracker.onConversationEnd((conv) => {
+        // Set generatingSummary before broadcasting "ended" to prevent
+        // a brief flash of "Untitled Conversation" on the frontend
+        const convId = conv._id!.toString();
+        conv.generatingSummary = true;
+        this.conversations.mutate((list) => {
+          const idx = list.findIndex((c) => c.id === convId);
+          if (idx >= 0) list[idx].generatingSummary = true;
+        });
         this.onConversationUpdate(conv, "ended");
         this.generateAISummary(conv);
       });
 
-      // Recover tracker state from DB (crash recovery)
-      await this.conversationTracker.recoverState(userId);
+      // Auto-end any stale active/paused conversations from before this restart
+      // (they'll never get silence chunks to end naturally)
+      const staleConversations = dbConversations.filter(
+        (c) => c.status === "active" || c.status === "paused",
+      );
+      for (const conv of staleConversations) {
+        const convId = conv._id!.toString();
+        console.log(
+          `[ConversationManager] Auto-ending stale conversation: ${convId} (was ${conv.status})`,
+        );
+        await updateConversation(convId, {
+          status: "ended",
+          endTime: new Date(),
+        });
+        conv.status = "ended";
+        conv.endTime = new Date();
+
+        // Update frontend state
+        const frontendConv = await this.toFrontendConversation(conv);
+        this.conversations.mutate((list) => {
+          const idx = list.findIndex((c) => c.id === convId);
+          if (idx >= 0) list[idx] = frontendConv;
+        });
+
+        // Generate AI summary if it has chunks
+        if (conv.chunkIds.length > 0 && !conv.aiSummary) {
+          this.generateAISummary(conv);
+        }
+      }
+      this.activeConversationId = null;
 
       console.log(
-        `[ConversationManager] Hydrated: ${frontendConversations.length} conversations for ${today}`,
+        `[ConversationManager] Hydrated: ${frontendConversations.length} conversations for ${today} (auto-ended ${staleConversations.length} stale)`,
       );
     } catch (error) {
       console.error("[ConversationManager] Failed to hydrate:", error);

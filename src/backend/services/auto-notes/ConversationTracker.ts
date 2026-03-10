@@ -423,25 +423,16 @@ export class ConversationTracker {
     await updateChunkClassification(chunkId, "meaningful", this.activeConversation._id!.toString());
 
     this.activeConversation.chunkIds.push(chunkId);
-    this.activeConversation.chunksSinceCompression++;
 
-    // Update running summary every N chunks
-    if (
-      this.activeConversation.chunksSinceCompression >=
-      AUTO_NOTES_CONFIG.SUMMARY_COMPRESSION_INTERVAL
-    ) {
-      await this.compressRunningSummary(chunk);
-    } else {
-      // Append chunk text to running summary
-      const updatedSummary = this.activeConversation.runningSummary
-        ? `${this.activeConversation.runningSummary}\n${chunk.text}`
-        : chunk.text;
+    // Append chunk text to running summary (no LLM calls during live conversation)
+    const updatedSummary = this.activeConversation.runningSummary
+      ? `${this.activeConversation.runningSummary}\n${chunk.text}`
+      : chunk.text;
 
-      await updateConversation(this.activeConversation._id!.toString(), {
-        runningSummary: updatedSummary,
-      });
-      this.activeConversation.runningSummary = updatedSummary;
-    }
+    await updateConversation(this.activeConversation._id!.toString(), {
+      runningSummary: updatedSummary,
+    });
+    this.activeConversation.runningSummary = updatedSummary;
 
     this._onConversationUpdate?.(this.activeConversation, "chunk_added");
   }
@@ -547,62 +538,6 @@ Respond with exactly YES or NO.`;
     } catch (error) {
       console.error("[ConversationTracker] Resumption check failed:", error);
       return false;
-    }
-  }
-
-  /**
-   * Compress running summary every N chunks to keep it under MAX_WORDS.
-   */
-  private async compressRunningSummary(
-    latestChunk: TranscriptChunkI,
-  ): Promise<void> {
-    if (!this.provider || !this.activeConversation) return;
-
-    const currentSummary =
-      this.activeConversation.runningSummary || "";
-    const fullText = `${currentSummary}\n${latestChunk.text}`;
-
-    const prompt = `Compress the following conversation transcript into a summary of under ${AUTO_NOTES_CONFIG.SUMMARY_MAX_WORDS} words. Preserve: names, numbers, decisions, action items, and key facts discussed.
-
-Transcript:
-"${fullText}"
-
-Write a concise summary:`;
-
-    try {
-      const response = await this.provider.chat(
-        [{ role: "user", content: prompt }],
-        {
-          tier: AUTO_NOTES_CONFIG.SUMMARY_MODEL_TIER,
-          maxTokens: AUTO_NOTES_CONFIG.SUMMARY_MAX_TOKENS,
-          temperature: 0.3,
-        },
-      );
-
-      const compressed =
-        response.content
-          .filter((c) => c.type === "text")
-          .map((c) => (c as any).text)
-          .join("")
-          .trim() || fullText;
-
-      await updateConversation(this.activeConversation._id!.toString(), {
-        runningSummary: compressed,
-        chunksSinceCompression: 0,
-      });
-
-      this.activeConversation.runningSummary = compressed;
-      this.activeConversation.chunksSinceCompression = 0;
-
-      console.log(
-        `[ConversationTracker] Compressed summary for conversation ${this.activeConversation._id}`,
-      );
-    } catch (error) {
-      console.error(
-        "[ConversationTracker] Summary compression failed:",
-        error,
-      );
-      // Keep the uncompressed version
     }
   }
 
