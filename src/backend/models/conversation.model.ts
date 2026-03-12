@@ -6,6 +6,7 @@
  */
 
 import mongoose, { Schema, Document, Model } from "mongoose";
+import { embedConversation } from "../services/embedding.service";
 
 // =============================================================================
 // Interfaces
@@ -28,6 +29,7 @@ export interface ConversationI extends Document {
   resumedFrom: string | null; // ID of conversation this was resumed from
   noteId: string | null; // Link to generated note
   noteGenerationFailed: boolean;
+  embedding: number[];
   silenceCount: number; // Consecutive silent/filler chunks
   chunksSinceCompression: number; // Chunks since last summary compression
   createdAt: Date;
@@ -58,6 +60,7 @@ const ConversationSchema = new Schema<ConversationI>(
     resumedFrom: { type: String, default: null },
     noteId: { type: String, default: null },
     noteGenerationFailed: { type: Boolean, default: false },
+    embedding: { type: [Number], default: [] },
     silenceCount: { type: Number, default: 0 },
     chunksSinceCompression: { type: Number, default: 0 },
   },
@@ -144,11 +147,18 @@ export async function updateConversation(
   conversationId: string,
   update: Partial<ConversationI>,
 ): Promise<ConversationI | null> {
-  return Conversation.findByIdAndUpdate(
+  const conv = await Conversation.findByIdAndUpdate(
     conversationId,
     { $set: update },
     { new: true },
   );
+
+  // Fire-and-forget: embed when aiSummary is set (conversation ended)
+  if (conv && update.aiSummary) {
+    embedConversation(conversationId, conv.title, conv.aiSummary).catch(() => {});
+  }
+
+  return conv;
 }
 
 /**

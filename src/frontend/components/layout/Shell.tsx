@@ -11,7 +11,7 @@
 import { ReactNode, useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { clsx } from "clsx";
-import { Home, Loader2, PencilLine, Settings, Wifi, WifiOff } from "lucide-react";
+import { Home, Loader2, PencilLine, Search, Settings, Wifi, WifiOff } from "lucide-react";
 import { useSynced } from "../../hooks/useSynced";
 import { useMentraAuth } from "@mentra/react";
 import type { SessionI } from "../../../shared/types";
@@ -34,6 +34,11 @@ const navItems: NavItem[] = [
     icon: Home,
     label: "Home",
     matchPaths: ["/", "/day"],
+  },
+  {
+    path: "/search",
+    icon: Search,
+    label: "Search",
   },
   {
     path: "/settings",
@@ -127,22 +132,35 @@ export function Shell({ children }: ShellProps) {
       {/* Mobile Bottom Navigation - hidden on detail pages */}
       {!hideBottomNav && (
       <div className="fixed bottom-0 left-0 right-0 md:hidden bg-white dark:bg-zinc-950  border-zinc-200 dark:border-zinc-800  z-30">
-        <div className="flex items-center justify-between h-[72px] px-12 pb-[15px]">
+        <div className="flex items-center justify-between h-[72px] px-8 pb-[15px]">
           {/* Home */}
           <button
             onClick={() => setLocation("/")}
             className={clsx(
-              "w-12 h-12 rounded-full flex items-center justify-center transition-colors",
+              "w-11 h-11 rounded-full flex items-center justify-center transition-colors",
               isActive(navItems[0])
                 ? "text-zinc-900 dark:text-zinc-100 bg-zinc-100 dark:bg-zinc-800"
                 : "text-zinc-400 dark:text-zinc-600 hover:text-zinc-600 dark:hover:text-zinc-400",
             )}
           >
             <Home
-              size={24}
+              size={22}
               strokeWidth={isActive(navItems[0]) ? 2.5 : 2}
               fill={isActive(navItems[0]) ? "currentColor" : "none"}
             />
+          </button>
+
+          {/* Search */}
+          <button
+            onClick={() => setLocation("/search")}
+            className={clsx(
+              "w-11 h-11 rounded-full flex items-center justify-center transition-colors",
+              isActive(navItems[1])
+                ? "text-zinc-900 dark:text-zinc-100 bg-zinc-100 dark:bg-zinc-800"
+                : "text-zinc-400 dark:text-zinc-600 hover:text-zinc-600 dark:hover:text-zinc-400",
+            )}
+          >
+            <Search size={22} strokeWidth={isActive(navItems[1]) ? 2.5 : 2} />
           </button>
 
           {/* Center Action Button - Pencil */}
@@ -150,15 +168,15 @@ export function Shell({ children }: ShellProps) {
             onClick={() => !generating && setShowQuickActions(true)}
             disabled={generating}
             className={clsx(
-              "w-12 h-12 rounded-full bg-zinc-900 dark:bg-white flex items-center justify-center shadow-sm transition-all",
+              "w-11 h-11 rounded-full bg-zinc-900 dark:bg-white flex items-center justify-center shadow-sm transition-all",
               generating ? "opacity-70 cursor-not-allowed" : "hover:scale-105 active:scale-95",
             )}
             title="Quick Actions"
           >
             {generating ? (
-              <Loader2 size={24} className="text-white dark:text-zinc-900 animate-spin" />
+              <Loader2 size={22} className="text-white dark:text-zinc-900 animate-spin" />
             ) : (
-              <PencilLine size={24} strokeWidth={2} className="text-white dark:text-zinc-900" />
+              <PencilLine size={22} strokeWidth={2} className="text-white dark:text-zinc-900" />
             )}
           </button>
 
@@ -166,13 +184,13 @@ export function Shell({ children }: ShellProps) {
           <button
             onClick={() => setLocation("/settings")}
             className={clsx(
-              "w-12 h-12 rounded-full flex items-center justify-center transition-colors",
-              isActive(navItems[1])
+              "w-11 h-11 rounded-full flex items-center justify-center transition-colors",
+              isActive(navItems[2])
                 ? "text-zinc-900 dark:text-zinc-100 bg-zinc-100 dark:bg-zinc-800"
                 : "text-zinc-400 dark:text-zinc-600 hover:text-zinc-600 dark:hover:text-zinc-400",
             )}
           >
-            <Settings size={24} strokeWidth={isActive(navItems[1]) ? 2.5 : 2} />
+            <Settings size={22} strokeWidth={isActive(navItems[2]) ? 2.5 : 2} />
           </button>
         </div>
       </div>

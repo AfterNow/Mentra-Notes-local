@@ -39,6 +39,7 @@ import type {
   Note,
   TranscriptSegment,
   HourSummary,
+  Conversation,
 } from "../../../shared/types";
 import { NotesTab } from "./components/tabs/NotesTab";
 import { TranscriptTab } from "./components/tabs/TranscriptTab";
@@ -77,10 +78,11 @@ export function DayPage() {
   const { session, isConnected, isReconnecting } = useSynced<SessionI>(userId || "");
 
   const newMentraUI = useFeatureFlag("new-mentraos-ui-miniapps");
+  const urlParams = useMemo(() => new URLSearchParams(window.location.search), []);
   const [activeTab, setActiveTab] = useState<TabType>(() => {
-    const params = new URLSearchParams(window.location.search);
-    return (params.get("tab") as TabType) || "transcript";
+    return (urlParams.get("tab") as TabType) || "transcript";
   });
+  const initialConversationId = useMemo(() => urlParams.get("conversationId"), [urlParams]);
   const lastLoadedDateRef = useRef<string | null>(null);
   const [isLoadingTranscript, setIsLoadingTranscript] = useState(false);
   // Snapshot segment count when a historical date finishes loading,
@@ -163,7 +165,37 @@ export function DayPage() {
   const isSyncingPhoto = session?.transcript?.isSyncingPhoto ?? false;
   const loadedDate = session?.transcript?.loadedDate ?? "";
   const files = session?.file?.files ?? [];
-  const conversations = session?.conversation?.conversations ?? [];
+  const syncedConversations = session?.conversation?.conversations ?? [];
+
+  // For past dates, fetch conversations from REST API
+  const [historicalConversations, setHistoricalConversations] = useState<Conversation[]>([]);
+  const [isLoadingConversations, setIsLoadingConversations] = useState(false);
+  const lastConversationDateRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!dateString || isToday) {
+      setHistoricalConversations([]);
+      lastConversationDateRef.current = null;
+      return;
+    }
+
+    if (lastConversationDateRef.current === dateString) return;
+    lastConversationDateRef.current = dateString;
+
+    setIsLoadingConversations(true);
+    fetch(`/api/conversations/${dateString}`, { credentials: "include" })
+      .then((res) => res.json())
+      .then((data) => {
+        setHistoricalConversations(data.conversations ?? []);
+      })
+      .catch((err) => {
+        console.error(`[DayPage] Failed to load conversations for ${dateString}:`, err);
+        setHistoricalConversations([]);
+      })
+      .finally(() => setIsLoadingConversations(false));
+  }, [dateString, isToday]);
+
+  const conversations = isToday ? syncedConversations : historicalConversations;
 
   // Data is loading when the server hasn't confirmed this date's data yet.
   // loadedDate is the source of truth for which date's segments are loaded.
@@ -642,8 +674,9 @@ export function DayPage() {
         <div className={clsx("h-full", activeTab !== "conversations" && "hidden")}>
           <ConversationsTab
             conversations={conversations}
-            isLoading={isDataLoading}
-            onDeleteConversation={(id) => session?.conversation?.deleteConversation(id)}
+            isLoading={isToday ? isDataLoading : isLoadingConversations}
+            onDeleteConversation={isToday ? (id) => session?.conversation?.deleteConversation(id) : undefined}
+            initialExpandedId={initialConversationId}
           />
         </div>
         {/* {activeTab === "audio" && <AudioTab />} */}

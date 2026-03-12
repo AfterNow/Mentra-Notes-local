@@ -6,6 +6,7 @@
  * - / → HomePage (folder list)
  * - /day/:date → DayPage (day detail with tabs)
  * - /note/:id → NotePage (individual note view/editor)
+ * - /search → SearchPage (semantic search)
  * - /settings → SettingsPage
  */
 
@@ -14,6 +15,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { HomePage } from "./pages/home/HomePage";
 import { DayPage } from "./pages/day/DayPage";
 import { NotePage } from "./pages/note/NotePage";
+import { SearchPage } from "./pages/search/SearchPage";
 import { SettingsPage } from "./pages/settings/SettingsPage";
 
 /** Renders routes frozen to a specific location so exit animations show the old page */
@@ -23,6 +25,7 @@ function FrozenRoutes({ location }: { location: string }) {
       <Route path="/" component={HomePage} />
       <Route path="/day/:date" component={DayPage} />
       <Route path="/note/:id" component={NotePage} />
+      <Route path="/search" component={SearchPage} />
       <Route path="/settings" component={SettingsPage} />
       <Route>
         <HomePage />

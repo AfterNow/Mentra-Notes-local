@@ -42,7 +42,7 @@ const authMiddleware = createAuthMiddleware({
  * Get userId from auth context
  */
 function getUserId(c: any): string | null {
-  return c.get("userId") || null;
+  return c.get("authUserId") || c.get("userId") || null;
 }
 
 /**
@@ -1141,6 +1141,101 @@ api.get("/transcripts/:transcriptId/download/:format", async (c) => {
   } catch (err: any) {
     console.error("[Transcript Download] Error:", err);
     return c.json({ error: "Failed to generate download" }, 500);
+  }
+});
+
+// =============================================================================
+// Conversations Endpoint
+// =============================================================================
+
+/**
+ * GET /conversations/:date - Get conversations for a specific date (YYYY-MM-DD)
+ * Used by the frontend to load conversations for past days.
+ * Today's conversations are handled via WebSocket sync.
+ */
+api.get("/conversations/:date", authMiddleware, async (c) => {
+  try {
+    const userId = requireAuth(c);
+    const date = c.req.param("date");
+
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return c.json({ error: "Invalid date format. Use YYYY-MM-DD." }, 400);
+    }
+
+    const { getConversationsByDate } = await import("../models/conversation.model");
+    const { getChunksByConversationId } = await import("../models/transcript-chunk.model");
+
+    const dbConversations = await getConversationsByDate(userId, date);
+
+    const conversations = await Promise.all(
+      dbConversations.map(async (conv) => {
+        const convId = conv._id!.toString();
+        const dbChunks = await getChunksByConversationId(convId);
+        const chunks = dbChunks.map((chunk) => ({
+          id: chunk._id!.toString(),
+          text: chunk.text,
+          startTime: chunk.startTime,
+          endTime: chunk.endTime,
+          wordCount: chunk.wordCount,
+        }));
+
+        return {
+          id: convId,
+          userId: conv.userId,
+          date: conv.date,
+          title: conv.title || "",
+          status: conv.status,
+          startTime: conv.startTime,
+          endTime: conv.endTime,
+          runningSummary: conv.runningSummary,
+          aiSummary: conv.aiSummary || "",
+          generatingSummary: conv.generatingSummary || false,
+          chunks,
+        };
+      }),
+    );
+
+    return c.json({ conversations });
+  } catch (err: any) {
+    console.error("[Conversations] Error:", err);
+    return c.json({ error: err.error || "Failed to fetch conversations" }, err.status || 500);
+  }
+});
+
+// =============================================================================
+// Search Endpoint
+// =============================================================================
+
+/**
+ * GET /search?q=<query>&limit=<number>&ai=true - Semantic search over notes & conversations
+ */
+api.get("/search", authMiddleware, async (c) => {
+  try {
+    const userId = requireAuth(c);
+    const query = c.req.query("q");
+    const limitParam = c.req.query("limit");
+    const aiParam = c.req.query("ai");
+
+    if (!query || !query.trim()) {
+      return c.json({ error: "Query parameter 'q' is required" }, 400);
+    }
+
+    const limit = limitParam ? parseInt(limitParam, 10) : 10;
+
+    const { semanticSearch } = await import("../services/search.service");
+    const results = await semanticSearch(userId, query.trim(), limit);
+
+    // Phase 3: AI quick answer
+    if (aiParam === "true" && results.length > 0) {
+      const { generateAnswer } = await import("../services/answer.service");
+      const answer = await generateAnswer(query.trim(), results);
+      return c.json({ answer, results });
+    }
+
+    return c.json({ results });
+  } catch (err: any) {
+    console.error("[Search] Error:", err);
+    return c.json({ error: err.error || "Search failed" }, err.status || 500);
   }
 });
 

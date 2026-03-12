@@ -98,6 +98,7 @@ Bun.serve({
     "/app": isDevelopment ? indexDev : indexProd,
     "/day/*": isDevelopment ? indexDev : indexProd,
     "/note/*": isDevelopment ? indexDev : indexProd,
+    "/search": isDevelopment ? indexDev : indexProd,
     "/settings": isDevelopment ? indexDev : indexProd,
   },
   fetch(request, server) {

@@ -7,7 +7,7 @@
  * - Empty state when no conversations detected
  */
 
-import { useState, useRef, useMemo, memo } from "react";
+import { useState, useRef, useMemo, useEffect, memo } from "react";
 import { clsx } from "clsx";
 import { AnimatePresence, motion, useMotionValue, useTransform, animate, type PanInfo } from "motion/react";
 import {
@@ -24,14 +24,24 @@ interface ConversationsTabProps {
   conversations: Conversation[];
   isLoading?: boolean;
   onDeleteConversation?: (conversationId: string) => void;
+  initialExpandedId?: string | null;
 }
 
 export function ConversationsTab({
   conversations,
   isLoading = false,
   onDeleteConversation,
+  initialExpandedId = null,
 }: ConversationsTabProps) {
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(initialExpandedId);
+  const scrollTargetRef = useRef<HTMLDivElement>(null);
+
+  // Scroll to the initially expanded conversation
+  useEffect(() => {
+    if (initialExpandedId && scrollTargetRef.current) {
+      scrollTargetRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [initialExpandedId]);
 
   // Loading state
   if (isLoading) {
@@ -85,6 +95,7 @@ export function ConversationsTab({
           {conversations.map((conversation) => (
             <motion.div
               key={conversation.id}
+              ref={conversation.id === initialExpandedId ? scrollTargetRef : undefined}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}

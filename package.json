@@ -20,7 +20,13 @@
     "test:eval:tracker": "bun test src/test/evals/conversation-tracker/conversation-tracker.test.ts",
     "test:eval:tracker:context": "EVAL_TYPE=context bun test src/test/evals/conversation-tracker/conversation-tracker.test.ts",
     "test:eval:tracker:resumption": "EVAL_TYPE=resumption bun test src/test/evals/conversation-tracker/conversation-tracker.test.ts",
-    "test:eval:tracker:summary": "EVAL_TYPE=summary bun test src/test/evals/conversation-tracker/conversation-tracker.test.ts"
+    "test:eval:tracker:summary": "EVAL_TYPE=summary bun test src/test/evals/conversation-tracker/conversation-tracker.test.ts",
+    "test:eval:search": "bun test src/test/evals/search/semantic-search.test.ts",
+    "test:eval:search:relevance": "EVAL_TYPE=relevance bun test src/test/evals/search/semantic-search.test.ts",
+    "test:eval:search:ranking": "EVAL_TYPE=ranking bun test src/test/evals/search/semantic-search.test.ts",
+    "test:eval:search:answer": "EVAL_TYPE=answer bun test src/test/evals/search/semantic-search.test.ts",
+    "seed:search": "bun src/test/seed-search-data.ts",
+    "seed:search:clean": "bun src/test/seed-search-data.ts --clean"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.35.0",
