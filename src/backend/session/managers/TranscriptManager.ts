@@ -101,6 +101,12 @@ export class TranscriptManager extends SyncedManager {
 
     try {
       const today = this.getTimeManager().today();
+
+      // Clear stale segments BEFORE async fetch so clients never see
+      // yesterday's data with today's loadedDate
+      if (this.loadedDate !== today) {
+        this.segments.set([]);
+      }
       this.loadedDate = today;
 
       // Load available dates from MongoDB
@@ -178,14 +184,29 @@ export class TranscriptManager extends SyncedManager {
     if (!userId) return;
 
     try {
-      const today = this.getTimeManager().today();
+      const timeManager = this.getTimeManager();
       const toSave = [...this.pendingSegments];
       this.pendingSegments = [];
 
-      await appendTranscriptSegments(userId, today, toSave);
-      console.log(
-        `[TranscriptManager] Persisted ${toSave.length} segments for ${userId}`,
-      );
+      // Group segments by their actual date (from timestamp) so segments
+      // created before midnight don't get saved under the next day's date
+      const segmentsByDate = new Map<string, TranscriptSegmentI[]>();
+      for (const segment of toSave) {
+        const segDate = segment.timestamp
+          ? timeManager.toDateString(new Date(segment.timestamp))
+          : timeManager.today();
+        if (!segmentsByDate.has(segDate)) {
+          segmentsByDate.set(segDate, []);
+        }
+        segmentsByDate.get(segDate)!.push(segment);
+      }
+
+      for (const [date, segments] of segmentsByDate) {
+        await appendTranscriptSegments(userId, date, segments);
+        console.log(
+          `[TranscriptManager] Persisted ${segments.length} segments for ${userId} on ${date}`,
+        );
+      }
     } catch (error) {
       console.error("[TranscriptManager] Failed to persist:", error);
     }

@@ -5,7 +5,7 @@
  * Uses the existing LLM provider infrastructure.
  */
 
-import { createProviderFromEnv } from "./llm";
+import { createProviderFromEnv } from "../../services/llm";
 import type { SearchResult } from "./search.service";
 
 /**

@@ -6,9 +6,9 @@
  * merges and ranks results by score.
  */
 
-import { generateEmbedding } from "./embedding.service";
-import { Note } from "../models/note.model";
-import { Conversation } from "../models/conversation.model";
+import { generateEmbedding } from "../../services/embedding.service";
+import { Note } from "../../models/note.model";
+import { Conversation } from "../../models/conversation.model";
 
 export interface SearchResult {
   id: string;

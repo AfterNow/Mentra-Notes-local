@@ -13,8 +13,8 @@ import { getConversationsByDate, deleteConversation, updateConversation } from "
 import { getChunksByConversationId } from "../../models/transcript-chunk.model";
 import type { ConversationI } from "../../models/conversation.model";
 import type { TranscriptChunkI } from "../../models/transcript-chunk.model";
-import { TriageClassifier } from "../../services/auto-notes/TriageClassifier";
-import { ConversationTracker } from "../../services/auto-notes/ConversationTracker";
+import { TriageClassifier } from "../../classifier/TriageClassifier";
+import { ConversationTracker } from "../../core/auto-conversation/ConversationTracker";
 import { createProviderFromEnv, type AgentProvider } from "../../services/llm";
 import type { ChunkBufferManager } from "./ChunkBufferManager";
 import { TimeManager } from "./TimeManager";
@@ -68,7 +68,7 @@ export class ConversationManager extends SyncedManager {
       try {
         this.llmProvider = createProviderFromEnv();
       } catch (error) {
-        console.warn("[ConversationManager] No LLM provider for summaries:", error);
+        console.warn("[ConvManager] No LLM provider for summaries:", error);
       }
 
       // Wire up callbacks
@@ -97,7 +97,7 @@ export class ConversationManager extends SyncedManager {
       for (const conv of staleConversations) {
         const convId = conv._id!.toString();
         console.log(
-          `[ConversationManager] Auto-ending stale conversation: ${convId} (was ${conv.status})`,
+          `[ConvManager] Auto-ending stale conversation: ${convId} (was ${conv.status})`,
         );
         await updateConversation(convId, {
           status: "ended",
@@ -121,10 +121,10 @@ export class ConversationManager extends SyncedManager {
       this.activeConversationId = null;
 
       console.log(
-        `[ConversationManager] Hydrated: ${frontendConversations.length} conversations for ${today} (auto-ended ${staleConversations.length} stale)`,
+        `[ConvManager] Hydrated: ${frontendConversations.length} conversations for ${today} (auto-ended ${staleConversations.length} stale)`,
       );
     } catch (error) {
-      console.error("[ConversationManager] Failed to hydrate:", error);
+      console.error("[ConvManager] Failed to hydrate:", error);
     }
   }
 
@@ -156,7 +156,7 @@ export class ConversationManager extends SyncedManager {
    */
   private async processChunk(chunk: TranscriptChunkI): Promise<void> {
     if (!this.triageClassifier || !this.conversationTracker) {
-      console.warn("[ConversationManager] Pipeline not initialized");
+      console.warn("[ConvManager] Pipeline not initialized");
       return;
     }
 
@@ -168,7 +168,7 @@ export class ConversationManager extends SyncedManager {
       await this.conversationTracker.processChunk(chunk, classification);
     } catch (error) {
       console.error(
-        "[ConversationManager] Pipeline error for chunk:",
+        "[ConvManager] Pipeline error for chunk:",
         error,
       );
     }
@@ -207,7 +207,7 @@ export class ConversationManager extends SyncedManager {
 
   private async generateAISummary(conv: ConversationI): Promise<void> {
     if (!this.llmProvider) {
-      console.warn("[ConversationManager] No LLM provider, skipping AI summary");
+      console.warn("[ConvManager] No LLM provider, skipping AI summary");
       return;
     }
 
@@ -223,7 +223,7 @@ export class ConversationManager extends SyncedManager {
     try {
       const chunks = await getChunksByConversationId(convId);
       if (chunks.length === 0) {
-        console.warn(`[ConversationManager] No chunks for conversation ${convId}, skipping summary`);
+        console.warn(`[ConvManager] No chunks for conversation ${convId}, skipping summary`);
         await updateConversation(convId, { generatingSummary: false });
         return;
       }
@@ -293,17 +293,17 @@ Respond now:`;
             if (title) list[idx].title = title;
           }
         });
-        console.log(`[ConversationManager] Generated AI summary for ${convId}: "${title}"`);
+        console.log(`[ConvManager] AI summary complete for ${convId}: "${title}"`);
       } else {
         await updateConversation(convId, { generatingSummary: false });
         this.conversations.mutate((list) => {
           const idx = list.findIndex((c) => c.id === convId);
           if (idx >= 0) list[idx].generatingSummary = false;
         });
-        console.warn(`[ConversationManager] LLM returned empty summary for ${convId}`);
+        console.warn(`[ConvManager] LLM returned empty summary for ${convId}`);
       }
     } catch (error) {
-      console.error(`[ConversationManager] AI summary generation failed for ${convId}:`, error);
+      console.error(`[ConvManager] AI summary generation failed for ${convId}:`, error);
       await updateConversation(convId, { generatingSummary: false }).catch(() => {});
       this.conversations.mutate((list) => {
         const idx = list.findIndex((c) => c.id === convId);
@@ -335,7 +335,7 @@ Respond now:`;
       this.activeConversationId = null;
     }
 
-    console.log(`[ConversationManager] Deleted conversation: ${conversationId}`);
+    console.log(`[ConvManager] Deleted conversation: ${conversationId}`);
   }
 
   // =========================================================================

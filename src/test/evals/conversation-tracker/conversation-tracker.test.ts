@@ -14,8 +14,8 @@
 
 import { describe, test, afterAll } from "bun:test";
 import { createProviderFromEnv, type AgentProvider } from "@/backend/services/llm";
-import { AUTO_NOTES_CONFIG } from "@/backend/services/auto-notes/config";
-import { getDomainPromptContext } from "@/backend/services/auto-notes/domain-config";
+import { AUTO_NOTES_CONFIG } from "@/backend/core/auto-conversation/config";
+import { getDomainPromptContext } from "@/backend/core/auto-conversation/domain-config";
 
 import contextCases from "./fixtures/chunk-in-context.json";
 import resumptionCases from "./fixtures/resumption-check.json";

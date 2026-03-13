@@ -21,9 +21,9 @@
 
 import { describe, test, afterAll, beforeAll } from "bun:test";
 import mongoose from "mongoose";
-import { semanticSearch } from "@/backend/services/search.service";
+import { semanticSearch } from "@/backend/core/semantic-search/search.service";
 import { generateEmbedding, stripHtml, prepareNoteText, prepareConversationText } from "@/backend/services/embedding.service";
-import { generateAnswer } from "@/backend/services/answer.service";
+import { generateAnswer } from "@/backend/core/semantic-search/answer.service";
 
 import searchCases from "./fixtures/semantic-search.json";
 

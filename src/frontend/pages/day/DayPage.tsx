@@ -326,6 +326,24 @@ export function DayPage() {
     historicalSegmentCountRef.current = null;
   }, [dateString]);
 
+  // Helper: extract YYYY-MM-DD from a timestamp in the user's timezone
+  const timezone = session?.settings?.timezone ?? undefined;
+  const getSegmentDate = useCallback((timestamp: Date | string): string => {
+    const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
+    if (timezone) {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        year: "numeric", month: "2-digit", day: "2-digit",
+        timeZone: timezone,
+      }).formatToParts(date);
+      const y = parts.find((p) => p.type === "year")?.value || "2026";
+      const m = parts.find((p) => p.type === "month")?.value || "01";
+      const d = parts.find((p) => p.type === "day")?.value || "01";
+      return `${y}-${m}-${d}`;
+    }
+    // Fallback: local browser time
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  }, [timezone]);
+
   // Filter transcript segments for this day
   const daySegments = useMemo(() => {
     // While loading, return empty to prevent stale data from flashing
@@ -338,19 +356,23 @@ export function DayPage() {
       if (!isToday && historicalSegmentCountRef.current !== null) {
         return allSegments.slice(0, historicalSegmentCountRef.current);
       }
+      // For today, filter by actual segment date to guard against
+      // stale segments from a previous day still in memory
+      if (isToday) {
+        return allSegments.filter((segment) => {
+          if (!segment.timestamp) return true;
+          return getSegmentDate(segment.timestamp) === dateString;
+        });
+      }
       return allSegments;
     }
 
-    // Fallback: filter by extracting YYYY-MM-DD from the UTC ISO timestamp
+    // Fallback: filter by segment date in user's timezone
     return allSegments.filter((segment) => {
       if (!segment.timestamp) return false;
-      const iso =
-        segment.timestamp instanceof Date
-          ? segment.timestamp.toISOString()
-          : String(segment.timestamp);
-      return iso.slice(0, 10) === dateString;
+      return getSegmentDate(segment.timestamp) === dateString;
     });
-  }, [allSegments, dateString, loadedDate, isDataLoading, isToday]);
+  }, [allSegments, dateString, loadedDate, isDataLoading, isToday, getSegmentDate]);
 
   const handleEmailSend = useCallback(async (to: string, cc: string) => {
     const ccList = cc ? cc.split(",").filter(Boolean) : undefined;
@@ -674,6 +696,7 @@ export function DayPage() {
         <div className={clsx("h-full", activeTab !== "conversations" && "hidden")}>
           <ConversationsTab
             conversations={conversations}
+            segments={daySegments}
             isLoading={isToday ? isDataLoading : isLoadingConversations}
             onDeleteConversation={isToday ? (id) => session?.conversation?.deleteConversation(id) : undefined}
             initialExpandedId={initialConversationId}

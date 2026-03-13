@@ -3,10 +3,11 @@
  *
  * State machine that tracks active conversations from meaningful chunks.
  *
- * States: IDLE → TRACKING → PAUSED → (back to TRACKING or END)
+ * States: IDLE → PENDING → TRACKING → PAUSED → (back to TRACKING or END)
  *
  * On each meaningful chunk:
- * - IDLE: start new conversation (or resume paused one)
+ * - IDLE: move to PENDING (buffer chunk, don't create DB conversation yet)
+ * - PENDING: buffer chunks until MIN_CHUNKS_TO_CONFIRM reached, then promote to TRACKING
  * - TRACKING: classify as CONTINUATION / NEW_CONVERSATION / FILLER
  * - PAUSED: resume if on-topic, or increment silence counter
  *
@@ -27,9 +28,9 @@ import {
 } from "../../models/conversation.model";
 import { AUTO_NOTES_CONFIG } from "./config";
 import { getDomainPromptContext, type DomainProfile } from "./domain-config";
-import { createProviderFromEnv, type AgentProvider } from "../llm";
+import { createProviderFromEnv, type AgentProvider } from "../../services/llm";
 
-export type TrackerState = "IDLE" | "TRACKING" | "PAUSED";
+export type TrackerState = "IDLE" | "PENDING" | "TRACKING" | "PAUSED";
 
 export type TrackingDecision =
   | "CONTINUATION"
@@ -48,6 +49,10 @@ export class ConversationTracker {
   private provider: AgentProvider | null = null;
   private domainProfile: DomainProfile;
 
+  // PENDING state buffer — chunks waiting for confirmation
+  private pendingChunks: TranscriptChunkI[] = [];
+  private pendingSilenceCount: number = 0;
+
   private _onConversationEnd: ConversationEndCallback | null = null;
   private _onConversationUpdate: ConversationUpdateCallback | null = null;
 
@@ -57,7 +62,7 @@ export class ConversationTracker {
     try {
       this.provider = createProviderFromEnv();
     } catch (error) {
-      console.error("[ConversationTracker] No LLM provider available:", error);
+      console.error("[Tracker] No LLM provider available:", error);
     }
   }
 
@@ -97,7 +102,7 @@ export class ConversationTracker {
       this.activeConversation = null;
       this.state = "IDLE";
       console.log(
-        `[ConversationTracker] Cleared active conversation: ${conversationId}`,
+        `[Tracker] Cleared active conversation: ${conversationId}`,
       );
       return true;
     }
@@ -131,6 +136,9 @@ export class ConversationTracker {
       case "IDLE":
         await this.handleIdleMeaningful(chunk);
         break;
+      case "PENDING":
+        await this.handlePendingMeaningful(chunk);
+        break;
       case "TRACKING":
         await this.handleTrackingMeaningful(chunk);
         break;
@@ -145,9 +153,13 @@ export class ConversationTracker {
   // =========================================================================
 
   /**
-   * IDLE + meaningful chunk: Check for resumable conversations, then start new or resume.
+   * IDLE + meaningful chunk: Check for resumable conversations, or move to PENDING.
    */
   private async handleIdleMeaningful(chunk: TranscriptChunkI): Promise<void> {
+    console.log(
+      `[Tracker] State: IDLE | received meaningful chunk #${chunk.chunkIndex} (${chunk.wordCount} words)`,
+    );
+
     // Check for resumable paused conversations
     const resumptionWindow = new Date(
       Date.now() - AUTO_NOTES_CONFIG.RESUMPTION_WINDOW_MS,
@@ -168,8 +180,39 @@ export class ConversationTracker {
       }
     }
 
-    // Start a new conversation
-    await this.startNewConversation(chunk);
+    // Move to PENDING — buffer the chunk, don't create DB conversation yet
+    this.pendingChunks = [chunk];
+    this.pendingSilenceCount = 0;
+    this.state = "PENDING";
+
+    console.log(
+      `[Tracker] IDLE → PENDING | first meaningful chunk buffered (1/${AUTO_NOTES_CONFIG.MIN_CHUNKS_TO_CONFIRM})`,
+    );
+  }
+
+  /**
+   * PENDING + meaningful chunk: Buffer until MIN_CHUNKS_TO_CONFIRM, then promote to TRACKING.
+   */
+  private async handlePendingMeaningful(chunk: TranscriptChunkI): Promise<void> {
+    this.pendingChunks.push(chunk);
+    this.pendingSilenceCount = 0; // Reset silence on meaningful chunk
+
+    const count = this.pendingChunks.length;
+    const needed = AUTO_NOTES_CONFIG.MIN_CHUNKS_TO_CONFIRM;
+
+    if (count < needed) {
+      console.log(
+        `[Tracker] State: PENDING | meaningful chunk #${chunk.chunkIndex} buffered (${count}/${needed})`,
+      );
+      return;
+    }
+
+    // Reached threshold — promote to TRACKING
+    console.log(
+      `[Tracker] State: PENDING | meaningful chunk #${chunk.chunkIndex} buffered (${count}/${needed}) — confirming conversation`,
+    );
+
+    await this.promoteToTracking();
   }
 
   /**
@@ -185,6 +228,9 @@ export class ConversationTracker {
     }
 
     const decision = await this.classifyChunkInContext(chunk);
+    console.log(
+      `[Tracker] State: TRACKING | chunk #${chunk.chunkIndex} classified as ${decision}`,
+    );
 
     switch (decision) {
       case "CONTINUATION":
@@ -221,8 +267,14 @@ export class ConversationTracker {
     );
 
     if (isContinuation) {
+      console.log(
+        `[Tracker] State: PAUSED | chunk #${chunk.chunkIndex} is continuation — resuming`,
+      );
       await this.resumeConversation(this.activeConversation, chunk);
     } else {
+      console.log(
+        `[Tracker] State: PAUSED | chunk #${chunk.chunkIndex} is new topic — ending paused, starting new`,
+      );
       // Different topic — end the paused conversation, start new
       await this.endConversation();
       await this.startNewConversation(chunk);
@@ -232,12 +284,33 @@ export class ConversationTracker {
   /**
    * Handle filler chunks — used for silence detection.
    */
-  private async handleFiller(chunk: TranscriptChunkI): Promise<void> {
+  private async handleFiller(_chunk: TranscriptChunkI): Promise<void> {
     if (this.state === "IDLE") return; // Nothing to do
+
+    if (this.state === "PENDING") {
+      this.pendingSilenceCount++;
+      console.log(
+        `[Tracker] State: PENDING | silence ${this.pendingSilenceCount}/${AUTO_NOTES_CONFIG.PENDING_SILENCE_THRESHOLD}`,
+      );
+
+      if (this.pendingSilenceCount >= AUTO_NOTES_CONFIG.PENDING_SILENCE_THRESHOLD) {
+        const discardedCount = this.pendingChunks.length;
+        this.pendingChunks = [];
+        this.pendingSilenceCount = 0;
+        this.state = "IDLE";
+        console.log(
+          `[Tracker] PENDING → IDLE | pending conversation discarded (${discardedCount} chunks never confirmed)`,
+        );
+      }
+      return;
+    }
 
     if (!this.activeConversation) return;
 
     if (this.state === "TRACKING") {
+      console.log(
+        `[Tracker] State: TRACKING | filler received — pausing`,
+      );
       // First filler chunk → pause
       await this.pauseConversation();
       return;
@@ -252,7 +325,7 @@ export class ConversationTracker {
       this.activeConversation.silenceCount = newSilenceCount;
 
       console.log(
-        `[ConversationTracker] Silence count: ${newSilenceCount}/${AUTO_NOTES_CONFIG.SILENCE_END_CHUNKS}`,
+        `[Tracker] State: PAUSED | silence ${newSilenceCount}/${AUTO_NOTES_CONFIG.SILENCE_END_CHUNKS}`,
       );
 
       if (newSilenceCount >= AUTO_NOTES_CONFIG.SILENCE_END_CHUNKS) {
@@ -266,6 +339,83 @@ export class ConversationTracker {
   // Conversation Lifecycle
   // =========================================================================
 
+  /**
+   * Promote pending chunks to a real conversation in the DB.
+   * Called when MIN_CHUNKS_TO_CONFIRM is reached.
+   */
+  private async promoteToTracking(): Promise<void> {
+    const chunks = this.pendingChunks;
+    if (chunks.length === 0) return;
+
+    const firstChunk = chunks[0];
+
+    // Pull preceding chunks as context preamble
+    const preambleCount = AUTO_NOTES_CONFIG.CONTEXT_PREAMBLE_CHUNKS;
+    const recentChunks = await getRecentChunks(
+      firstChunk.userId,
+      firstChunk.date,
+      preambleCount + chunks.length,
+    );
+
+    const pendingIds = new Set(chunks.map((c) => c._id?.toString()));
+    const candidatePreamble = recentChunks.filter(
+      (c) =>
+        !pendingIds.has(c._id?.toString()) &&
+        !c.conversationId,
+    ).slice(-preambleCount);
+
+    // Filter preamble: only include chunks related to the conversation
+    const preambleChunks = await this.filterRelevantPreamble(candidatePreamble, chunks);
+
+    const startTime = preambleChunks.length > 0
+      ? preambleChunks[0].startTime
+      : firstChunk.startTime;
+
+    const conversation = await createConversation({
+      userId: firstChunk.userId,
+      date: firstChunk.date,
+      startTime,
+    });
+
+    this.activeConversation = conversation;
+    this.state = "TRACKING";
+
+    // Add preamble chunks first
+    for (const preamble of preambleChunks) {
+      await appendChunkToConversation(
+        conversation._id!.toString(),
+        preamble._id!.toString(),
+      );
+      await updateChunkClassification(
+        preamble._id!.toString(),
+        preamble.classification as any,
+        conversation._id!.toString(),
+      );
+      conversation.chunkIds.push(preamble._id!.toString());
+    }
+
+    if (candidatePreamble.length > 0) {
+      console.log(
+        `[Tracker] Preamble: ${preambleChunks.length}/${candidatePreamble.length} chunks were relevant`,
+      );
+    }
+
+    // Add all buffered pending chunks
+    for (const pendingChunk of chunks) {
+      await this.addChunkToConversation(pendingChunk);
+    }
+
+    // Clear pending buffer
+    this.pendingChunks = [];
+    this.pendingSilenceCount = 0;
+
+    console.log(
+      `[Tracker] PENDING → TRACKING | conversation created: ${conversation._id} (${conversation.chunkIds.length} chunks)`,
+    );
+
+    this._onConversationUpdate?.(conversation, "started");
+  }
+
   private async startNewConversation(
     chunk: TranscriptChunkI,
   ): Promise<void> {
@@ -278,11 +428,14 @@ export class ConversationTracker {
     );
 
     // Filter out the current chunk and any already assigned to another conversation
-    const preambleChunks = recentChunks.filter(
+    const candidatePreamble = recentChunks.filter(
       (c) =>
         c._id?.toString() !== chunk._id?.toString() &&
         !c.conversationId,
     ).slice(-preambleCount); // Take the most recent N
+
+    // Filter preamble: only include chunks related to the conversation
+    const preambleChunks = await this.filterRelevantPreamble(candidatePreamble, [chunk]);
 
     // Use the earliest preamble chunk's startTime as conversation start
     const startTime = preambleChunks.length > 0
@@ -312,9 +465,9 @@ export class ConversationTracker {
       conversation.chunkIds.push(preamble._id!.toString());
     }
 
-    if (preambleChunks.length > 0) {
+    if (candidatePreamble.length > 0) {
       console.log(
-        `[ConversationTracker] Added ${preambleChunks.length} preamble chunks as context`,
+        `[Tracker] Preamble: ${preambleChunks.length}/${candidatePreamble.length} chunks were relevant`,
       );
     }
 
@@ -322,7 +475,7 @@ export class ConversationTracker {
     await this.addChunkToConversation(chunk);
 
     console.log(
-      `[ConversationTracker] Started new conversation: ${conversation._id}`,
+      `[Tracker] IDLE → TRACKING | conversation created: ${conversation._id} (${conversation.chunkIds.length} chunks)`,
     );
 
     this._onConversationUpdate?.(conversation, "started");
@@ -348,7 +501,7 @@ export class ConversationTracker {
     await this.addChunkToConversation(chunk);
 
     console.log(
-      `[ConversationTracker] Resumed conversation: ${conversation._id}`,
+      `[Tracker] PAUSED → TRACKING | conversation ${conversation._id} resumed`,
     );
 
     this._onConversationUpdate?.(conversation, "resumed");
@@ -370,7 +523,7 @@ export class ConversationTracker {
     this.state = "PAUSED";
 
     console.log(
-      `[ConversationTracker] Paused conversation: ${this.activeConversation._id}`,
+      `[Tracker] TRACKING → PAUSED | conversation ${this.activeConversation._id} paused (silenceCount: 1)`,
     );
 
     this._onConversationUpdate?.(this.activeConversation, "paused");
@@ -379,6 +532,7 @@ export class ConversationTracker {
   private async endConversation(): Promise<void> {
     if (!this.activeConversation) return;
 
+    const prevState = this.state;
     const now = new Date();
     await updateConversation(this.activeConversation._id!.toString(), {
       status: "ended",
@@ -388,8 +542,14 @@ export class ConversationTracker {
     this.activeConversation.status = "ended";
     this.activeConversation.endTime = now;
 
+    const duration = this.activeConversation.startTime
+      ? Math.round((now.getTime() - new Date(this.activeConversation.startTime).getTime()) / 1000)
+      : 0;
+    const durationStr = duration >= 60
+      ? `${Math.floor(duration / 60)}m ${duration % 60}s`
+      : `${duration}s`;
     console.log(
-      `[ConversationTracker] Ended conversation: ${this.activeConversation._id} (${this.activeConversation.chunkIds.length} chunks)`,
+      `[Tracker] ${prevState} → IDLE | conversation ${this.activeConversation._id} ended (${this.activeConversation.chunkIds.length} chunks, ${durationStr})`,
     );
 
     const endedConversation = this.activeConversation;
@@ -424,7 +584,7 @@ export class ConversationTracker {
 
     this.activeConversation.chunkIds.push(chunkId);
 
-    // Append chunk text to running summary (no LLM calls during live conversation)
+    // Append chunk text to running summary
     const updatedSummary = this.activeConversation.runningSummary
       ? `${this.activeConversation.runningSummary}\n${chunk.text}`
       : chunk.text;
@@ -434,7 +594,143 @@ export class ConversationTracker {
     });
     this.activeConversation.runningSummary = updatedSummary;
 
+    // Check if summary needs compression
+    const chunksSinceCompression = (this.activeConversation.chunksSinceCompression || 0);
+    if (
+      chunksSinceCompression >= AUTO_NOTES_CONFIG.SUMMARY_COMPRESSION_INTERVAL &&
+      this.getWordCount(updatedSummary) > AUTO_NOTES_CONFIG.SUMMARY_MAX_WORDS
+    ) {
+      await this.compressSummary();
+    }
+
     this._onConversationUpdate?.(this.activeConversation, "chunk_added");
+  }
+
+  /**
+   * Compress the running summary using an LLM call.
+   */
+  private async compressSummary(): Promise<void> {
+    if (!this.activeConversation || !this.provider) return;
+
+    const summary = this.activeConversation.runningSummary;
+    const wordCount = this.getWordCount(summary);
+    const targetWords = Math.floor(AUTO_NOTES_CONFIG.SUMMARY_MAX_WORDS / 2);
+
+    console.log(
+      `[Tracker] Summary compression triggered (conv ${this.activeConversation._id}, ${wordCount} words → compressing to ~${targetWords})`,
+    );
+
+    try {
+      const response = await this.provider.chat(
+        [{
+          role: "user",
+          content: `Compress this conversation summary to ~${targetWords} words while preserving all key facts, decisions, names, numbers, and action items. Remove redundancy and filler.\n\nSummary:\n${summary}`,
+        }],
+        {
+          tier: AUTO_NOTES_CONFIG.SUMMARY_MODEL_TIER,
+          maxTokens: AUTO_NOTES_CONFIG.SUMMARY_MAX_TOKENS,
+          temperature: 0.1,
+        },
+      );
+
+      const compressed =
+        response.content
+          .filter((c) => c.type === "text")
+          .map((c) => (c as any).text)
+          .join("")
+          .trim() || summary;
+
+      const compressedWordCount = this.getWordCount(compressed);
+
+      await updateConversation(this.activeConversation._id!.toString(), {
+        runningSummary: compressed,
+        chunksSinceCompression: 0,
+      });
+      this.activeConversation.runningSummary = compressed;
+      this.activeConversation.chunksSinceCompression = 0;
+
+      console.log(
+        `[Tracker] Summary compressed: ${wordCount} → ${compressedWordCount} words`,
+      );
+    } catch (error) {
+      console.error("[Tracker] Summary compression failed:", error);
+      // Non-fatal — just reset counter so we try again later
+      await updateConversation(this.activeConversation._id!.toString(), {
+        chunksSinceCompression: 0,
+      });
+      this.activeConversation.chunksSinceCompression = 0;
+    }
+  }
+
+  private getWordCount(text: string): number {
+    return text.split(/\s+/).filter((w) => w.length > 0).length;
+  }
+
+  /**
+   * Filter preamble chunks to only include those relevant to the conversation.
+   * Uses a single LLM call to check all candidates at once.
+   * Falls back to including all candidates if no LLM is available.
+   */
+  private async filterRelevantPreamble(
+    candidates: TranscriptChunkI[],
+    conversationChunks: TranscriptChunkI[],
+  ): Promise<TranscriptChunkI[]> {
+    if (candidates.length === 0) return [];
+    if (!this.provider) return candidates; // No LLM — include all
+
+    const conversationText = conversationChunks.map((c) => c.text).join("\n");
+    const candidateList = candidates
+      .map((c, i) => `[${i + 1}] "${c.text}"`)
+      .join("\n");
+
+    const prompt = `You are checking whether preceding transcript chunks are related to a conversation that just started.
+
+Conversation so far:
+"${conversationText}"
+
+Preceding chunks (captured before the conversation started):
+${candidateList}
+
+For each chunk, respond with its number ONLY if it is related to the conversation topic. Unrelated fragments, background noise, or different topics should be excluded.
+
+Respond with a comma-separated list of numbers (e.g. "1,3") or "NONE" if none are related.`;
+
+    try {
+      const response = await this.provider.chat(
+        [{ role: "user", content: prompt }],
+        {
+          tier: AUTO_NOTES_CONFIG.TRACKER_MODEL_TIER,
+          maxTokens: 32,
+          temperature: 0.1,
+        },
+      );
+
+      const text =
+        response.content
+          .filter((c) => c.type === "text")
+          .map((c) => (c as any).text)
+          .join("")
+          .trim()
+          .toUpperCase() || "NONE";
+
+      if (text.includes("NONE")) {
+        console.log(`[Tracker] Preamble filter: none relevant`);
+        return [];
+      }
+
+      // Parse numbers from response
+      const numbers = text.match(/\d+/g)?.map(Number) || [];
+      const relevant = candidates.filter((_, i) => numbers.includes(i + 1));
+
+      console.log(
+        `[Tracker] Preamble filter: kept ${relevant.length}/${candidates.length} (indices: ${numbers.join(",")})`,
+      );
+
+      return relevant;
+    } catch (error) {
+      console.error("[Tracker] Preamble relevance check failed:", error);
+      return candidates; // Fail-open: include all
+    }
   }
 
   // =========================================================================
@@ -492,7 +788,7 @@ Respond with exactly one word: CONTINUATION, NEW_CONVERSATION, or FILLER`;
       if (text.includes("FILLER")) return "FILLER";
       return "CONTINUATION";
     } catch (error) {
-      console.error("[ConversationTracker] LLM classification failed:", error);
+      console.error("[Tracker] LLM classification failed:", error);
       return "CONTINUATION"; // Fail-safe: keep tracking
     }
   }
@@ -536,7 +832,7 @@ Respond with exactly YES or NO.`;
 
       return text.includes("YES");
     } catch (error) {
-      console.error("[ConversationTracker] Resumption check failed:", error);
+      console.error("[Tracker] Resumption check failed:", error);
       return false;
     }
   }
@@ -563,7 +859,7 @@ Respond with exactly YES or NO.`;
         conversation.status === "active" ? "TRACKING" : "PAUSED";
 
       console.log(
-        `[ConversationTracker] Recovered state: ${this.state}, conversation: ${conversation._id}`,
+        `[Tracker] Recovered state: ${this.state} | conversation: ${conversation._id}`,
       );
     }
   }

@@ -18,10 +18,11 @@ import {
   Loader2,
   Sparkles,
 } from "lucide-react";
-import type { Conversation, ConversationChunk } from "../../../../../shared/types";
+import type { Conversation, TranscriptSegment } from "../../../../../shared/types";
 
 interface ConversationsTabProps {
   conversations: Conversation[];
+  segments: TranscriptSegment[];
   isLoading?: boolean;
   onDeleteConversation?: (conversationId: string) => void;
   initialExpandedId?: string | null;
@@ -29,11 +30,14 @@ interface ConversationsTabProps {
 
 export function ConversationsTab({
   conversations,
+  segments,
   isLoading = false,
   onDeleteConversation,
   initialExpandedId = null,
 }: ConversationsTabProps) {
-  const [expandedId, setExpandedId] = useState<string | null>(initialExpandedId);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(
+    initialExpandedId ? new Set([initialExpandedId]) : new Set(),
+  );
   const scrollTargetRef = useRef<HTMLDivElement>(null);
 
   // Scroll to the initially expanded conversation
@@ -103,11 +107,15 @@ export function ConversationsTab({
             >
               <ConversationCard
                 conversation={conversation}
-                isExpanded={expandedId === conversation.id}
+                segments={segments}
+                isExpanded={expandedIds.has(conversation.id)}
                 onToggle={() =>
-                  setExpandedId(
-                    expandedId === conversation.id ? null : conversation.id,
-                  )
+                  setExpandedIds((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(conversation.id)) next.delete(conversation.id);
+                    else next.add(conversation.id);
+                    return next;
+                  })
                 }
                 onDelete={onDeleteConversation}
               />
@@ -125,6 +133,7 @@ export function ConversationsTab({
 
 interface ConversationCardProps {
   conversation: Conversation;
+  segments: TranscriptSegment[];
   isExpanded: boolean;
   onToggle: () => void;
   onDelete?: (conversationId: string) => void;
@@ -132,6 +141,7 @@ interface ConversationCardProps {
 
 const ConversationCard = memo(function ConversationCard({
   conversation,
+  segments,
   isExpanded,
   onToggle,
   onDelete,
@@ -198,9 +208,14 @@ const ConversationCard = memo(function ConversationCard({
       <div
         role="button"
         tabIndex={0}
-        onClick={() => { if (!isDragging.current) onToggle(); }}
+        onClick={() => {
+          if (isDragging.current) return;
+          const selection = window.getSelection();
+          if (selection && selection.toString().length > 0) return;
+          onToggle();
+        }}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(); } }}
-        className="w-full text-left p-4 flex flex-col gap-2 cursor-pointer"
+        className="w-full text-left p-4 flex flex-col gap-2 cursor-pointer select-text"
       >
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
@@ -269,11 +284,15 @@ const ConversationCard = memo(function ConversationCard({
             </button>
           </div>
 
-          <div className="p-4 max-h-[400px] overflow-y-auto">
+          <div className="p-4 max-h-[400px] overflow-y-auto select-text">
             {activeSection === "summary" ? (
               <SummarySection conversation={conversation} />
             ) : (
-              <TranscriptSection chunks={conversation.chunks} />
+              <TranscriptSection
+                segments={segments}
+                startTime={conversation.startTime}
+                endTime={conversation.endTime}
+              />
             )}
           </div>
 
@@ -398,32 +417,52 @@ function SummarySection({
 // TranscriptSection
 // =============================================================================
 
-const TranscriptSection = memo(function TranscriptSection({ chunks }: { chunks: ConversationChunk[] }) {
-  if (chunks.length === 0) {
+const TranscriptSection = memo(function TranscriptSection({
+  segments,
+  startTime,
+  endTime,
+}: {
+  segments: TranscriptSegment[];
+  startTime: Date;
+  endTime: Date | null;
+}) {
+  // Filter segments that fall within the conversation's time range
+  const conversationSegments = useMemo(() => {
+    const start = new Date(startTime).getTime();
+    const end = endTime ? new Date(endTime).getTime() : Date.now();
+
+    return segments.filter((seg) => {
+      if (!seg.isFinal || seg.type === "photo") return false;
+      const segTime = new Date(seg.timestamp).getTime();
+      return segTime >= start && segTime <= end;
+    });
+  }, [segments, startTime, endTime]);
+
+  if (conversationSegments.length === 0) {
     return (
       <p className="text-sm text-zinc-500 dark:text-zinc-400">
-        No transcript chunks yet.
+        No transcript segments yet.
       </p>
     );
   }
 
   return (
-    <div className="space-y-3">
-      {chunks.map((chunk) => (
-        <ChunkRow key={chunk.id} chunk={chunk} />
+    <div className="space-y-2">
+      {conversationSegments.map((segment) => (
+        <SegmentRow key={segment.id} segment={segment} />
       ))}
     </div>
   );
 });
 
-const ChunkRow = memo(function ChunkRow({ chunk }: { chunk: ConversationChunk }) {
+const SegmentRow = memo(function SegmentRow({ segment }: { segment: TranscriptSegment }) {
   return (
     <div className="flex gap-3">
       <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono shrink-0 pt-0.5 whitespace-nowrap">
-        {formatTime(chunk.startTime)}
+        {formatTime(segment.timestamp)}
       </span>
       <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
-        {chunk.text}
+        {segment.text}
       </p>
     </div>
   );

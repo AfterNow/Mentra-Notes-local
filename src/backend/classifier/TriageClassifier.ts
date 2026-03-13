@@ -7,21 +7,21 @@
  * - meaningful: LLM says it's substantive conversation worth tracking
  */
 
-import type { TranscriptChunkI } from "../../models/transcript-chunk.model";
+import type { TranscriptChunkI } from "../models/transcript-chunk.model";
 import {
   getRecentChunks,
   updateChunkClassification,
-} from "../../models/transcript-chunk.model";
-import { AUTO_NOTES_CONFIG } from "./config";
+} from "../models/transcript-chunk.model";
+import { AUTO_NOTES_CONFIG } from "../core/auto-conversation/config";
 import {
   containsHighSignalKeyword,
   getDomainPromptContext,
   type DomainProfile,
-} from "./domain-config";
+} from "../core/auto-conversation/domain-config";
 import {
   createProviderFromEnv,
   type AgentProvider,
-} from "../llm";
+} from "../services/llm";
 
 export type TriageResult = "auto-skipped" | "filler" | "meaningful";
 
@@ -36,7 +36,7 @@ export class TriageClassifier {
       this.provider = createProviderFromEnv();
     } catch (error) {
       console.error(
-        "[TriageClassifier] No LLM provider available, will auto-skip all chunks:",
+        "[Triage] No LLM provider available, will auto-skip all chunks:",
         error,
       );
     }
@@ -72,7 +72,7 @@ export class TriageClassifier {
       !containsHighSignalKeyword(chunk.text, this.domainProfile)
     ) {
       console.log(
-        `[TriageClassifier] Auto-skipped chunk #${chunk.chunkIndex}: ${chunk.wordCount} words, no keywords`,
+        `[Triage] Chunk #${chunk.chunkIndex}: auto-skipped (${chunk.wordCount} words, below minimum, no keywords)`,
       );
       await updateChunkClassification(chunk._id!.toString(), "auto-skipped");
       return "auto-skipped";
@@ -105,7 +105,9 @@ export class TriageClassifier {
 
       const domainContext = getDomainPromptContext(this.domainProfile);
 
-      const prompt = `You are a transcript triage classifier for an always-on wearable microphone. Your job is to decide if a transcript chunk contains meaningful conversation or is just filler/background noise.
+      const prompt = `You are a transcript triage classifier for smart glasses worn by a single user. Your job is to decide if a transcript chunk contains meaningful conversation the user is participating in, or is just filler/background noise.
+
+If the chunk sounds like TV, a podcast, YouTube, a lecture, or any broadcast playing in the background — not a conversation the user is actively participating in — classify as FILLER.
 
 Domain context: ${domainContext}
 
@@ -116,6 +118,9 @@ Classify this chunk as either FILLER or MEANINGFUL.
 
 FILLER means:
 - Background noise, music, TV, or transcription artifacts (e.g. "[inaudible]", "[crosstalk]")
+- One-way monologues: lectures, podcasts, news segments, YouTube videos, audiobooks
+- Content that lacks conversational markers (no turn-taking, no direct address to the user)
+- Audio that sounds scripted, read aloud, or educational without user participation
 - Greetings and goodbyes with no substance ("hey how's it going", "see you later")
 - Small talk about weather, food, commute, sports, weekend plans
 - Pure acknowledgments and backchannel ("yeah", "okay sure", "mmhmm", "that's interesting")
@@ -132,6 +137,7 @@ MEANINGFUL means:
 - Problem reports, incidents, or complaints with specifics
 - Planning, scheduling, or coordination
 - Any statement that a note-taker would want to capture
+- Must involve the user participating in the conversation (not just overhearing it)
 
 IMPORTANT: Even very short phrases can be meaningful if they convey a specific fact, data point, or decision. "She quit" is meaningful (important news). "Thursday at nine" is meaningful (scheduling). "Two fifty" is meaningful (a number/price). But "okay sure" is filler (pure acknowledgment).
 
@@ -161,14 +167,14 @@ Respond with exactly one word: FILLER or MEANINGFUL`;
         : "meaningful";
 
       console.log(
-        `[TriageClassifier] Chunk #${chunk.chunkIndex}: ${classification} (LLM said: ${responseText})`,
+        `[Triage] Chunk #${chunk.chunkIndex}: ${classification} (LLM: ${responseText}, ${chunk.wordCount} words)`,
       );
 
       await updateChunkClassification(chunk._id!.toString(), classification);
       return classification;
     } catch (error) {
       console.error(
-        `[TriageClassifier] LLM classification failed for chunk #${chunk.chunkIndex}, defaulting to meaningful:`,
+        `[Triage] LLM classification failed for chunk #${chunk.chunkIndex}, defaulting to meaningful:`,
         error,
       );
       // Fail-open: treat as meaningful

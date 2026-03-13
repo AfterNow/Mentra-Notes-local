@@ -182,7 +182,7 @@ api.post("/test/simulate-conversation", async (c) => {
     success: true,
     message: `Injected ${segments.length} segments into ${userId}'s session. The chunk buffer will emit a chunk in ~40 seconds.`,
     chunkBufferRunning: session.chunkBuffer.isRunning,
-    tip: "Watch the server logs for [ChunkBufferManager], [TriageClassifier], [ConversationTracker], and [NoteGenerator] output.",
+    tip: "Watch the server logs for [ChunkBuffer], [Triage], [Tracker], and [ConvManager] output.",
   });
 });
 
@@ -1222,12 +1222,12 @@ api.get("/search", authMiddleware, async (c) => {
 
     const limit = limitParam ? parseInt(limitParam, 10) : 10;
 
-    const { semanticSearch } = await import("../services/search.service");
+    const { semanticSearch } = await import("../core/semantic-search/search.service");
     const results = await semanticSearch(userId, query.trim(), limit);
 
     // Phase 3: AI quick answer
     if (aiParam === "true" && results.length > 0) {
-      const { generateAnswer } = await import("../services/answer.service");
+      const { generateAnswer } = await import("../core/semantic-search/answer.service");
       const answer = await generateAnswer(query.trim(), results);
       return c.json({ answer, results });
     }

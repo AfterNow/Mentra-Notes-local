@@ -17,7 +17,7 @@ import {
   getNextChunkIndex,
   type TranscriptChunkI,
 } from "../../models/transcript-chunk.model";
-import { AUTO_NOTES_CONFIG } from "../../services/auto-notes/config";
+import { AUTO_NOTES_CONFIG } from "../../core/auto-conversation/config";
 import { TimeManager } from "./TimeManager";
 
 export type ChunkReadyCallback = (chunk: TranscriptChunkI) => void;
@@ -46,10 +46,10 @@ export class ChunkBufferManager extends SyncedManager {
       const today = this.getTimeManager().today();
       this.chunkIndex = await getNextChunkIndex(userId, today);
       console.log(
-        `[ChunkBufferManager] Hydrated for ${userId}, next chunkIndex: ${this.chunkIndex}`,
+        `[ChunkBuffer] Hydrated | next chunkIndex: ${this.chunkIndex}`,
       );
     } catch (error) {
-      console.error("[ChunkBufferManager] Failed to hydrate:", error);
+      console.error("[ChunkBuffer] Failed to hydrate:", error);
     }
   }
 
@@ -87,7 +87,7 @@ export class ChunkBufferManager extends SyncedManager {
     this._isRunning = true;
 
     console.log(
-      `[ChunkBufferManager] Starting heartbeat (${AUTO_NOTES_CONFIG.BUFFER_INTERVAL_MS}ms)`,
+      `[ChunkBuffer] Starting heartbeat (${AUTO_NOTES_CONFIG.BUFFER_INTERVAL_MS / 1000}s interval)`,
     );
 
     this.heartbeatTimer = setInterval(() => {
@@ -111,7 +111,7 @@ export class ChunkBufferManager extends SyncedManager {
       this.sentenceWaitTimer = null;
     }
 
-    console.log(`[ChunkBufferManager] Stopped heartbeat`);
+    console.log(`[ChunkBuffer] Stopped heartbeat`);
   }
 
   get isRunning(): boolean {
@@ -157,7 +157,7 @@ export class ChunkBufferManager extends SyncedManager {
     if (this.buffer.length === 0) {
       if (this._isSpeaking) {
         // User is mid-sentence (interim results flowing) — not real silence, skip
-        console.log(`[ChunkBufferManager] Skipping silence signal — user is still speaking`);
+        console.log(`[ChunkBuffer] Skipping silence — user still speaking (interim results active)`);
         return;
       }
       // Empty buffer and no speech activity — emit silence signal
@@ -241,8 +241,9 @@ export class ChunkBufferManager extends SyncedManager {
 
       this.chunkIndex++;
 
+      const preview = text.length > 50 ? text.substring(0, 50) + "..." : text;
       console.log(
-        `[ChunkBufferManager] Chunk #${chunk.chunkIndex} emitted: ${wordCount} words, classification: pending`,
+        `[ChunkBuffer] Chunk #${chunk.chunkIndex} emitted | ${wordCount} words | "${preview}"`,
       );
 
       // Forward to pipeline
@@ -251,13 +252,13 @@ export class ChunkBufferManager extends SyncedManager {
           this._onChunkReady(chunk);
         } catch (error) {
           console.error(
-            "[ChunkBufferManager] Error in onChunkReady callback:",
+            "[ChunkBuffer] Error in onChunkReady callback:",
             error,
           );
         }
       }
     } catch (error) {
-      console.error("[ChunkBufferManager] Failed to create chunk:", error);
+      console.error("[ChunkBuffer] Failed to create chunk:", error);
     }
   }
 
@@ -287,12 +288,12 @@ export class ChunkBufferManager extends SyncedManager {
       metadata: {},
     } as any;
 
-    console.log(`[ChunkBufferManager] Silence signal emitted`);
+    console.log(`[ChunkBuffer] Silence signal emitted`);
 
     try {
       this._onChunkReady(silenceChunk);
     } catch (error) {
-      console.error("[ChunkBufferManager] Error in silence signal callback:", error);
+      console.error("[ChunkBuffer] Error in silence signal callback:", error);
     }
   }
 

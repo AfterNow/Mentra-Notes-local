@@ -1,7 +1,7 @@
 /**
- * Auto-Notes Services Index
+ * Auto-Conversation Pipeline Index
  *
- * Re-exports all auto-notes pipeline components.
+ * Re-exports all auto-conversation pipeline components.
  */
 
 export { AUTO_NOTES_CONFIG } from "./config";
@@ -12,10 +12,9 @@ export {
   type DomainProfile,
   type DomainContext,
 } from "./domain-config";
-export { TriageClassifier, type TriageResult } from "./TriageClassifier";
+export { TriageClassifier, type TriageResult } from "../../classifier/TriageClassifier";
 export {
   ConversationTracker,
   type TrackerState,
   type TrackingDecision,
 } from "./ConversationTracker";
-export { NoteGenerator } from "./NoteGenerator";

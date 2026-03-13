@@ -8,19 +8,19 @@
  * The classifier is tested in isolation: we construct a minimal TranscriptChunkI object
  * and call classify() directly, bypassing DB reads/writes with a test subclass.
  *
- * Fixtures: src/test/evals/triage/fixtures/triage-classifier-{easy,medium,hard,realistic}.json
+ * Fixtures: src/test/evals/classifier/fixtures/triage-classifier-{easy,medium,hard,realistic}.json
  *
- * Run all:         bun test:eval:triage
- * Run one:         bun test:eval:triage:easy / medium / hard / realistic
+ * Run all:         bun test:eval:classifier
+ * Run one:         bun test:eval:classifier:easy / medium / hard / realistic
  */
 
 import { describe, test, afterAll } from "bun:test";
 import { createProviderFromEnv, type AgentProvider } from "@/backend/services/llm";
-import { AUTO_NOTES_CONFIG } from "@/backend/services/auto-notes/config";
+import { AUTO_NOTES_CONFIG } from "@/backend/core/auto-conversation/config";
 import {
   getDomainPromptContext,
   type DomainProfile,
-} from "@/backend/services/auto-notes/domain-config";
+} from "@/backend/core/auto-conversation/domain-config";
 
 import easyCases from "./fixtures/triage-classifier-easy.json";
 import mediumCases from "./fixtures/triage-classifier-medium.json";
