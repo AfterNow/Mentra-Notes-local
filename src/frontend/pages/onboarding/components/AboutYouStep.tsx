@@ -70,7 +70,7 @@ export function AboutYouStep({ onNext, onBack, data, onChange }: AboutYouStepPro
       </div>
 
       {/* LinkedIn Connect */}
-      <div className="flex flex-col pt-6 px-6">
+      {/* <div className="flex flex-col pt-6 px-6">
         <div className="flex flex-col rounded-2xl gap-4 bg-[#F5F5F4] dark:bg-zinc-800 p-5">
           <div className="flex items-center gap-3">
             <div className="flex items-center justify-center shrink-0 rounded-[10px] bg-[#2563EB] size-10">
@@ -104,7 +104,7 @@ export function AboutYouStep({ onNext, onBack, data, onChange }: AboutYouStepPro
             </div>
           </button>
         </div>
-      </div>
+      </div> */}
 
     </div>
   );
