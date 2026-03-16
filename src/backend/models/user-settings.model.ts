@@ -18,6 +18,13 @@ export interface UserSettingsI extends Document {
   superCollapsed: boolean;
   displayName?: string;
   timezone?: string;
+  // Onboarding
+  onboardingCompleted: boolean;
+  role?: string;
+  company?: string;
+  priorities?: string[];
+  contacts?: string[];
+  topics?: string[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -39,6 +46,13 @@ const UserSettingsSchema = new Schema<UserSettingsI>(
     superCollapsed: { type: Boolean, default: false },
     displayName: { type: String },
     timezone: { type: String },
+    // Onboarding
+    onboardingCompleted: { type: Boolean, default: false },
+    role: { type: String },
+    company: { type: String },
+    priorities: { type: [String], default: [] },
+    contacts: { type: [String], default: [] },
+    topics: { type: [String], default: [] },
   },
   { timestamps: true },
 );
@@ -96,6 +110,12 @@ export async function updateUserSettings(
     superCollapsed: boolean;
     displayName: string;
     timezone: string;
+    onboardingCompleted: boolean;
+    role: string;
+    company: string;
+    priorities: string[];
+    contacts: string[];
+    topics: string[];
   }>,
 ): Promise<UserSettingsI | null> {
   return UserSettings.findOneAndUpdate(

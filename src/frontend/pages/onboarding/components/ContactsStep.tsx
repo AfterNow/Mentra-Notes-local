@@ -4,27 +4,37 @@
  */
 
 import { useState } from "react";
+import type { OnboardingData } from "../OnboardingPage";
 
 interface ContactsStepProps {
   onNext: () => void;
   onBack?: () => void;
+  data: OnboardingData;
+  onChange: (partial: Partial<OnboardingData>) => void;
 }
 
-export function ContactsStep({ onNext, onBack }: ContactsStepProps) {
+export function ContactsStep({ onNext, onBack, data, onChange }: ContactsStepProps) {
   const [nameInput, setNameInput] = useState("");
   const [topicInput, setTopicInput] = useState("");
-  const [topics, setTopics] = useState<string[]>(["Q3 Mobile Redesign", "Client Beta"]);
+
+  const addContact = () => {
+    const trimmed = nameInput.trim();
+    if (trimmed && !data.contacts.includes(trimmed)) {
+      onChange({ contacts: [...data.contacts, trimmed] });
+      setNameInput("");
+    }
+  };
 
   const addTopic = () => {
     const trimmed = topicInput.trim();
-    if (trimmed && !topics.includes(trimmed)) {
-      setTopics((prev) => [...prev, trimmed]);
+    if (trimmed && !data.topics.includes(trimmed)) {
+      onChange({ topics: [...data.topics, trimmed] });
       setTopicInput("");
     }
   };
 
   const removeTopic = (topic: string) => {
-    setTopics((prev) => prev.filter((t) => t !== topic));
+    onChange({ topics: data.topics.filter((t) => t !== topic) });
   };
 
   return (
@@ -53,6 +63,7 @@ export function ContactsStep({ onNext, onBack }: ContactsStepProps) {
             type="text"
             value={nameInput}
             onChange={(e) => setNameInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addContact()}
             placeholder="Add a name..."
             className="text-[15px] leading-5 text-[#1C1917] dark:text-white font-['Red_Hat_Display',system-ui,sans-serif] placeholder:text-[#A8A29E] bg-transparent outline-none w-full"
           />
@@ -82,9 +93,9 @@ export function ContactsStep({ onNext, onBack }: ContactsStepProps) {
         </div>
 
         {/* Topic Tags */}
-        {topics.length > 0 && (
+        {data.topics.length > 0 && (
           <div className="flex flex-wrap gap-2">
-            {topics.map((topic) => (
+            {data.topics.map((topic) => (
               <button
                 key={topic}
                 onClick={() => removeTopic(topic)}

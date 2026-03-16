@@ -3,17 +3,16 @@
  * Name, role, company fields + LinkedIn connect option
  */
 
-import { useState } from "react";
+import type { OnboardingData } from "../OnboardingPage";
 
 interface AboutYouStepProps {
   onNext: () => void;
   onBack?: () => void;
+  data: OnboardingData;
+  onChange: (partial: Partial<OnboardingData>) => void;
 }
 
-export function AboutYouStep({ onNext, onBack }: AboutYouStepProps) {
-  const [name, setName] = useState("");
-  const [role, setRole] = useState("");
-  const [company, setCompany] = useState("");
+export function AboutYouStep({ onNext, onBack, data, onChange }: AboutYouStepProps) {
 
   return (
     <div className="flex flex-col h-full">
@@ -38,8 +37,8 @@ export function AboutYouStep({ onNext, onBack }: AboutYouStepProps) {
           </div>
           <input
             type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
+            value={data.name}
+            onChange={(e) => onChange({ name: e.target.value })}
             placeholder="Enter your name"
             className="flex items-center rounded-xl py-3.5 px-4 bg-[#F5F5F4] dark:bg-zinc-800 text-[16px] leading-5 text-[#1C1917] dark:text-white font-['Red_Hat_Display',system-ui,sans-serif] font-medium placeholder:text-[#A8A29E] outline-none w-full"
           />
@@ -50,8 +49,8 @@ export function AboutYouStep({ onNext, onBack }: AboutYouStepProps) {
           </div>
           <input
             type="text"
-            value={role}
-            onChange={(e) => setRole(e.target.value)}
+            value={data.role}
+            onChange={(e) => onChange({ role: e.target.value })}
             placeholder="e.g. Product Manager, Engineer..."
             className="flex items-center rounded-xl py-3.5 px-4 bg-[#F5F5F4] dark:bg-zinc-800 text-[16px] leading-5 text-[#1C1917] dark:text-white font-['Red_Hat_Display',system-ui,sans-serif] placeholder:text-[#A8A29E] outline-none w-full"
           />
@@ -62,8 +61,8 @@ export function AboutYouStep({ onNext, onBack }: AboutYouStepProps) {
           </div>
           <input
             type="text"
-            value={company}
-            onChange={(e) => setCompany(e.target.value)}
+            value={data.company}
+            onChange={(e) => onChange({ company: e.target.value })}
             placeholder="e.g. Mentra, Acme Corp..."
             className="flex items-center rounded-xl py-3.5 px-4 bg-[#F5F5F4] dark:bg-zinc-800 text-[16px] leading-5 text-[#1C1917] dark:text-white font-['Red_Hat_Display',system-ui,sans-serif] placeholder:text-[#A8A29E] outline-none w-full"
           />

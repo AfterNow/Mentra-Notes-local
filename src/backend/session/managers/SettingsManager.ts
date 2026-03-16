@@ -31,6 +31,13 @@ export class SettingsManager extends SyncedManager {
   @synced timezone: string | null = null; // IANA timezone e.g. "America/Los_Angeles"
   @synced glassesDisplayMode: GlassesDisplayMode = "live_transcript";
   @synced superCollapsed = false;
+  // Onboarding
+  @synced onboardingCompleted = false;
+  @synced role: string | null = null;
+  @synced company: string | null = null;
+  @synced priorities: string[] = [];
+  @synced contacts: string[] = [];
+  @synced topics: string[] = [];
 
   // ===========================================================================
   // Lifecycle
@@ -49,6 +56,13 @@ export class SettingsManager extends SyncedManager {
       this.superCollapsed = settings.superCollapsed ?? false;
       this.displayName = settings.displayName || null;
       this.timezone = settings.timezone || null;
+      // Onboarding
+      this.onboardingCompleted = settings.onboardingCompleted ?? false;
+      this.role = settings.role || null;
+      this.company = settings.company || null;
+      this.priorities = settings.priorities || [];
+      this.contacts = settings.contacts || [];
+      this.topics = settings.topics || [];
 
       console.log(`[SettingsManager] Hydrated settings for ${userId} (timezone: ${this.timezone})`);
     } catch (error) {
@@ -67,6 +81,12 @@ export class SettingsManager extends SyncedManager {
     timezone?: string;
     glassesDisplayMode?: GlassesDisplayMode;
     superCollapsed?: boolean;
+    onboardingCompleted?: boolean;
+    role?: string;
+    company?: string;
+    priorities?: string[];
+    contacts?: string[];
+    topics?: string[];
   }): Promise<void> {
     const userId = this._session?.userId;
 
@@ -89,6 +109,24 @@ export class SettingsManager extends SyncedManager {
     if (settings.superCollapsed !== undefined) {
       this.superCollapsed = settings.superCollapsed;
     }
+    if (settings.onboardingCompleted !== undefined) {
+      this.onboardingCompleted = settings.onboardingCompleted;
+    }
+    if (settings.role !== undefined) {
+      this.role = settings.role;
+    }
+    if (settings.company !== undefined) {
+      this.company = settings.company;
+    }
+    if (settings.priorities !== undefined) {
+      this.priorities = settings.priorities;
+    }
+    if (settings.contacts !== undefined) {
+      this.contacts = settings.contacts;
+    }
+    if (settings.topics !== undefined) {
+      this.topics = settings.topics;
+    }
 
     // Persist to database
     if (userId) {
@@ -99,6 +137,12 @@ export class SettingsManager extends SyncedManager {
           superCollapsed: this.superCollapsed,
           displayName: this.displayName || undefined,
           timezone: this.timezone || undefined,
+          onboardingCompleted: this.onboardingCompleted,
+          role: this.role || undefined,
+          company: this.company || undefined,
+          priorities: this.priorities,
+          contacts: this.contacts,
+          topics: this.topics,
         });
       } catch (error) {
         console.error("[SettingsManager] Failed to persist settings:", error);
@@ -113,6 +157,12 @@ export class SettingsManager extends SyncedManager {
     timezone: string | null;
     glassesDisplayMode: GlassesDisplayMode;
     superCollapsed: boolean;
+    onboardingCompleted: boolean;
+    role: string | null;
+    company: string | null;
+    priorities: string[];
+    contacts: string[];
+    topics: string[];
   }> {
     return {
       showLiveTranscript: this.showLiveTranscript,
@@ -120,6 +170,12 @@ export class SettingsManager extends SyncedManager {
       timezone: this.timezone,
       glassesDisplayMode: this.glassesDisplayMode,
       superCollapsed: this.superCollapsed,
+      onboardingCompleted: this.onboardingCompleted,
+      role: this.role,
+      company: this.company,
+      priorities: this.priorities,
+      contacts: this.contacts,
+      topics: this.topics,
     };
   }
 }

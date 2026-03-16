@@ -3,11 +3,14 @@
  * Multi-select priority options
  */
 
-import { useState } from "react";
+import { useCallback } from "react";
+import type { OnboardingData } from "../OnboardingPage";
 
 interface PrioritiesStepProps {
   onNext: () => void;
   onBack?: () => void;
+  data: OnboardingData;
+  onChange: (partial: Partial<OnboardingData>) => void;
 }
 
 const priorities = [
@@ -33,20 +36,18 @@ const priorities = [
   },
 ];
 
-export function PrioritiesStep({ onNext, onBack }: PrioritiesStepProps) {
-  const [selected, setSelected] = useState<Set<string>>(new Set(["decisions", "summaries"]));
+export function PrioritiesStep({ onNext, onBack, data, onChange }: PrioritiesStepProps) {
+  const selected = data.priorities;
 
-  const toggle = (id: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
+  const toggle = useCallback((id: string) => {
+    const next = new Set(data.priorities);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    onChange({ priorities: next });
+  }, [data.priorities, onChange]);
 
   return (
     <div className="flex flex-col h-full">

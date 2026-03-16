@@ -14,7 +14,9 @@ import { clsx } from "clsx";
 import { Router } from "./router";
 import { Shell } from "./components/layout/Shell";
 import { useFeatureFlag, FLAGS } from "./services/posthog";
-// import { SplashScreen } from "./components/shared/SplashScreen";
+import { SplashScreen } from "./components/shared/SplashScreen";
+import { useSynced } from "./hooks/useSynced";
+import type { SessionI } from "../shared/types";
 
 // =============================================================================
 // Theme Context
@@ -41,26 +43,33 @@ export function useTheme() {
 // =============================================================================
 
 export function App() {
-  const { isLoading, error } = useMentraAuth();
+  const { isLoading, error, userId } = useMentraAuth();
   const [, navigate] = useLocation();
+  const { session } = useSynced<SessionI>(userId || "");
 
-  // Redirect to onboarding on app open (controlled by feature flag)
+  // Redirect to onboarding on app open (controlled by feature flag + onboardingCompleted)
   const { enabled: showOnboarding, loaded: flagsLoaded } = useFeatureFlag(FLAGS.FRONTEND_ONBOARD, true);
   const [onboardingResolved, setOnboardingResolved] = useState(false);
   useEffect(() => {
     if (!flagsLoaded) return;
-    if (showOnboarding) {
+    // Skip onboarding if the user has already completed it
+    const alreadyCompleted = session?.settings?.onboardingCompleted;
+    if (showOnboarding && !alreadyCompleted) {
       navigate("/onboarding");
     }
     setOnboardingResolved(true);
-  }, [showOnboarding, flagsLoaded]);
+  }, [showOnboarding, flagsLoaded, session?.settings?.onboardingCompleted]);
 
-  // // Splash screen: show for 3s, then fade out
-  // const [splashVisible, setSplashVisible] = useState(true);
-  // useEffect(() => {
-  //   const timer = setTimeout(() => setSplashVisible(false), 3000);
-  //   return () => clearTimeout(timer);
-  // }, []);
+  // Post-onboarding transition splash — survives the route change from /onboarding → /
+  const [postOnboardingSplash, setPostOnboardingSplash] = useState(false);
+  useEffect(() => {
+    const flag = sessionStorage.getItem("onboarding-complete-splash");
+    if (flag) {
+      sessionStorage.removeItem("onboarding-complete-splash");
+      setPostOnboardingSplash(true);
+    }
+  });
+
 
   // Theme state
   const [theme, setTheme] = useState<"light" | "dark">(() => {
@@ -133,10 +142,12 @@ export function App() {
     toggleTheme,
   };
 
-  // Don't render until onboarding check resolves to prevent home screen flash
+  // Don't render app until onboarding check resolves — show splash instead
   if (!onboardingResolved) {
     return (
-      <div className={clsx("h-screen w-screen bg-[#FAFAF9] dark:bg-black", theme)} />
+      <div className={clsx(theme)}>
+        <SplashScreen visible message="Loading" />
+      </div>
     );
   }
 
@@ -152,7 +163,12 @@ export function App() {
         <Shell>
           <Router />
         </Shell>
-        {/* <SplashScreen visible={splashVisible} /> */}
+        <SplashScreen
+          visible={postOnboardingSplash}
+          message="Getting you set up"
+          duration={1200}
+          onDone={() => setPostOnboardingSplash(false)}
+        />
       </div>
     </ThemeContext.Provider>
   );

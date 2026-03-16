@@ -10,9 +10,12 @@
  * 5-9. Tutorial walkthrough (5 pages: Always on, AI does the work, Stay organized, Swipe to manage, You're all set)
  */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { AnimatePresence, motion } from "motion/react";
+import { useMentraAuth } from "@mentra/react";
+import { useSynced } from "../../hooks/useSynced";
+import type { SessionI } from "../../../shared/types";
 import {
   trackOnboardingStarted,
   trackOnboardingStepViewed,
@@ -29,6 +32,17 @@ import { TutorialOrganize } from "./components/TutorialOrganize";
 import { TutorialSwipe } from "./components/TutorialSwipe";
 import { TutorialComplete } from "./components/TutorialComplete";
 import { OnboardingFooter } from "./components/OnboardingFooter";
+import { SplashScreen } from "../../components/shared/SplashScreen";
+
+/** Onboarding form data collected across steps */
+export interface OnboardingData {
+  name: string;
+  role: string;
+  company: string;
+  priorities: Set<string>;
+  contacts: string[];
+  topics: string[];
+}
 
 const TOTAL_STEPS = 9;
 
@@ -47,12 +61,62 @@ const STEP_NAMES = [
 export function OnboardingPage() {
   const [step, setStep] = useState(0);
   const [direction, setDirection] = useState(1);
+  const [showSplash, setShowSplash] = useState(false);
   const [, navigate] = useLocation();
+
+  // Synced session for saving onboarding data
+  const { userId } = useMentraAuth();
+  const { session } = useSynced<SessionI>(userId || "");
+
+  // Lifted onboarding form state
+  const [onboardingData, setOnboardingData] = useState<OnboardingData>({
+    name: "",
+    role: "",
+    company: "",
+    priorities: new Set(["decisions", "summaries"]),
+    contacts: [],
+    topics: [],
+  });
+
+  const updateOnboardingData = useCallback((partial: Partial<OnboardingData>) => {
+    setOnboardingData((prev) => ({ ...prev, ...partial }));
+  }, []);
+
+  /** Save onboarding data to backend via synced session */
+  const saveOnboardingData = useCallback(async () => {
+    if (!session?.settings) return;
+    try {
+      await session.settings.updateSettings({
+        displayName: onboardingData.name || undefined,
+        role: onboardingData.role || undefined,
+        company: onboardingData.company || undefined,
+        priorities: Array.from(onboardingData.priorities),
+        contacts: onboardingData.contacts,
+        topics: onboardingData.topics,
+        onboardingCompleted: true,
+      });
+    } catch (err) {
+      console.error("[Onboarding] Failed to save data:", err);
+    }
+  }, [session, onboardingData]);
 
   // Track onboarding started on mount
   useEffect(() => {
     trackOnboardingStarted();
   }, []);
+
+  // Save data and navigate to home while splash still covers the screen
+  const hasSaved = useRef(false);
+  useEffect(() => {
+    if (!showSplash || hasSaved.current) return;
+    hasSaved.current = true;
+    saveOnboardingData();
+    const timer = setTimeout(() => {
+      sessionStorage.setItem("onboarding-complete-splash", "1");
+      navigate("/");
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [showSplash]);
 
   // Track each step view
   useEffect(() => {
@@ -62,12 +126,12 @@ export function OnboardingPage() {
   const next = useCallback(() => {
     if (step >= TOTAL_STEPS - 1) {
       trackOnboardingCompleted();
-      navigate("/");
+      setShowSplash(true);
       return;
     }
     setDirection(1);
     setStep((s) => s + 1);
-  }, [step, navigate]);
+  }, [step]);
 
   const back = useCallback(() => {
     if (step <= 0) return;
@@ -77,8 +141,8 @@ export function OnboardingPage() {
 
   const finish = useCallback(() => {
     trackOnboardingSkipped(step);
-    navigate("/");
-  }, [navigate, step]);
+    setShowSplash(true);
+  }, [step]);
 
   const variants = {
     enter: (dir: number) => ({
@@ -108,11 +172,11 @@ export function OnboardingPage() {
       case 0:
         return <WelcomeStep onNext={next} />;
       case 1:
-        return <AboutYouStep onNext={next} onBack={back} />;
+        return <AboutYouStep onNext={next} onBack={back} data={onboardingData} onChange={updateOnboardingData} />;
       case 2:
-        return <PrioritiesStep onNext={next} onBack={back} />;
+        return <PrioritiesStep onNext={next} onBack={back} data={onboardingData} onChange={updateOnboardingData} />;
       case 3:
-        return <ContactsStep onNext={next} onBack={back} />;
+        return <ContactsStep onNext={next} onBack={back} data={onboardingData} onChange={updateOnboardingData} />;
       case 4:
         return <TutorialAlwaysOn onNext={next} onBack={back} />;
       case 5:
@@ -158,6 +222,14 @@ export function OnboardingPage() {
           onBack={step > 0 ? back : undefined}
         />
       )}
+
+      {/* Post-onboarding splash — navigate while still covering, then fade */}
+      <SplashScreen
+        visible={showSplash}
+        message="Getting you set up"
+        duration={2400}
+        onDone={() => {}}
+      />
     </div>
   );
 }

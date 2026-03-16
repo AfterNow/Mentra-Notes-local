@@ -301,6 +301,26 @@ export function SettingsPage() {
             />
           </div>
 
+          {/* Onboarding */}
+          <div className="mt-8 mb-2">
+            <h3 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
+              Onboarding
+            </h3>
+            <SettingsRow
+              label="Reset onboarding"
+              type="link"
+              onClick={async () => {
+                if (!session?.settings?.updateSettings) return;
+                await session.settings.updateSettings({ onboardingCompleted: false });
+                setLocation("/onboarding");
+              }}
+              disabled={!isConnected}
+            />
+            <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1 mb-4">
+              Restart the onboarding tutorial and update your profile
+            </p>
+          </div>
+
           {/* Timezone Info */}
           {savedTimezone && (
             <div className="mt-8 mb-2">

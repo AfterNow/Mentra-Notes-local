@@ -164,6 +164,13 @@ export interface SettingsManagerI {
   timezone: string | null; // IANA timezone e.g. "America/Los_Angeles"
   glassesDisplayMode: GlassesDisplayMode;
   superCollapsed: boolean;
+  // Onboarding
+  onboardingCompleted: boolean;
+  role: string | null;
+  company: string | null;
+  priorities: string[];
+  contacts: string[];
+  topics: string[];
 
   // RPCs
   updateSettings(settings: {
@@ -172,6 +179,12 @@ export interface SettingsManagerI {
     timezone?: string;
     glassesDisplayMode?: GlassesDisplayMode;
     superCollapsed?: boolean;
+    onboardingCompleted?: boolean;
+    role?: string;
+    company?: string;
+    priorities?: string[];
+    contacts?: string[];
+    topics?: string[];
   }): Promise<void>;
 }
 
