@@ -229,7 +229,7 @@ export function TranscriptPage() {
           {/* Left: back + title */}
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setLocation("/")}
+              onClick={() => setLocation("/?tab=transcripts")}
               className="p-1 -ml-1 text-[#1C1917]"
             >
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none">

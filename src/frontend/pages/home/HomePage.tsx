@@ -10,11 +10,10 @@
  * - Keeps all existing backend logic (filters, trash, archive, calendar)
  */
 
-import { useState, useMemo } from "react";
-import { useLocation } from "wouter";
+import { useState, useMemo, useEffect } from "react";
+import { useLocation, useSearch } from "wouter";
 import { useMentraAuth } from "@mentra/react";
 import { ChevronLeft } from "lucide-react";
-import { format, isToday, isYesterday } from "date-fns";
 import { useSynced } from "../../hooks/useSynced";
 import type { SessionI, FileFilter, Conversation } from "../../../shared/types";
 import type { DailyFolder } from "./components/FolderList";
@@ -28,14 +27,15 @@ import { GlobalAIChat } from "./components/GlobalAIChat";
 import { ConversationList } from "./components/ConversationList";
 import { FABMenu } from "./components/FABMenu";
 import { TabBar } from "./components/TabBar";
+import { TranscriptList } from "./components/TranscriptList";
 import { Drawer } from "vaul";
 import { HomePageSkeleton } from "../../components/shared/SkeletonLoader";
-
 
 export function HomePage() {
   const { userId } = useMentraAuth();
   const { session, isConnected, reconnect } = useSynced<SessionI>(userId || "");
   const [, setLocation] = useLocation();
+  const search = useSearch();
 
   // Local UI state
   const [isAllNotesView, setIsAllNotesView] = useState(false);
@@ -43,7 +43,29 @@ export function HomePage() {
   const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
   const [showGlobalChat, setShowGlobalChat] = useState(false);
   const [showEmptyTrashConfirm, setShowEmptyTrashConfirm] = useState(false);
-  const [activeTimeFilter, setActiveTimeFilter] = useState<"conversations" | "transcripts">("conversations");
+  const initialTab =
+    new URLSearchParams(search).get("tab") === "transcripts"
+      ? "transcripts"
+      : ("conversations" as const);
+  const [activeTimeFilter, setActiveTimeFilter] = useState<
+    "conversations" | "transcripts"
+  >(initialTab);
+  // renderedFilter is what's actually shown — swaps after fade-out completes
+  const [renderedFilter, setRenderedFilter] = useState<
+    "conversations" | "transcripts"
+  >(initialTab);
+  const [tabOpacity, setTabOpacity] = useState(1);
+
+  useEffect(() => {
+    if (activeTimeFilter === renderedFilter) return;
+    // Fade out
+    setTabOpacity(0);
+    const swap = setTimeout(() => {
+      setRenderedFilter(activeTimeFilter);
+      setTabOpacity(1);
+    }, 250);
+    return () => clearTimeout(swap);
+  }, [activeTimeFilter]);
 
   // Derive data from session
   const files = session?.file?.files ?? [];
@@ -61,9 +83,12 @@ export function HomePage() {
     : backendFilter === "favourites"
       ? "favorites"
       : "folders";
-  const activeFilter: FilterType = backendFilter === "favourites" ? "all" : backendFilter as FilterType;
+  const activeFilter: FilterType =
+    backendFilter === "favourites" ? "all" : (backendFilter as FilterType);
 
-  console.log(`[HomePage] Render - backendFilter: ${backendFilter}, activeView: ${activeView}, conversations: ${conversations.length}`);
+  console.log(
+    `[HomePage] Render - backendFilter: ${backendFilter}, activeView: ${activeView}, conversations: ${conversations.length}`,
+  );
 
   // Transform FileData to DailyFolder format (kept for calendar view)
   const folders = useMemo((): DailyFolder[] => {
@@ -99,7 +124,12 @@ export function HomePage() {
   }, [conversations]);
 
   // Filter counts
-  const fileCounts = session?.file?.counts ?? { all: 0, archived: 0, trash: 0, favourites: 0 };
+  const fileCounts = session?.file?.counts ?? {
+    all: 0,
+    archived: 0,
+    trash: 0,
+    favourites: 0,
+  };
   const filterCounts = useMemo(
     () => ({
       all: fileCounts.all,
@@ -135,7 +165,9 @@ export function HomePage() {
     }
   };
 
-  const handleTabNavigate = (tab: "conversations" | "search" | "notes" | "settings") => {
+  const handleTabNavigate = (
+    tab: "conversations" | "search" | "notes" | "settings",
+  ) => {
     switch (tab) {
       case "search":
         setLocation("/search");
@@ -221,13 +253,19 @@ export function HomePage() {
       <div className="flex h-full flex-col bg-[#FAFAF9] relative overflow-hidden">
         {/* Header */}
         <div className="flex flex-col pt-6 gap-2 px-6">
-          <div className={`text-[11px] tracking-widest uppercase leading-3.5 text-[#DC2626] font-red-hat font-bold`}>
+          <div
+            className={`text-[11px] tracking-widest uppercase leading-3.5 text-[#DC2626] font-red-hat font-bold`}
+          >
             Mentra Notes
           </div>
-          <div className={`text-[30px] tracking-[-0.03em] leading-[34px] text-[#1C1917] font-red-hat font-extrabold`}>
+          <div
+            className={`text-[30px] tracking-[-0.03em] leading-[34px] text-[#1C1917] font-red-hat font-extrabold`}
+          >
             Conversations
           </div>
-          <div className={`text-[14px] leading-[18px] text-[#A8A29E] font-red-hat`}>
+          <div
+            className={`text-[14px] leading-[18px] text-[#A8A29E] font-red-hat`}
+          >
             No conversations yet
           </div>
         </div>
@@ -236,19 +274,32 @@ export function HomePage() {
         <div className="flex flex-col items-center justify-center grow px-10 gap-4">
           <div className="flex items-center justify-center shrink-0 rounded-[20px] bg-[#F5F5F4] size-16">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="#A8A29E" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+              <path
+                d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+                stroke="#A8A29E"
+                strokeWidth="1.75"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
             </svg>
           </div>
-          <div className={`text-[18px] leading-[22px] text-center text-[#1C1917] font-red-hat font-bold`}>
+          <div
+            className={`text-[18px] leading-[22px] text-center text-[#1C1917] font-red-hat font-bold`}
+          >
             Start a conversation
           </div>
-          <div className={`text-[14px] leading-5 text-center text-[#A8A29E] font-red-hat`}>
-            Mentra Notes is listening in the background. When it detects a conversation, it will appear here.
+          <div
+            className={`text-[14px] leading-5 text-center text-[#A8A29E] font-red-hat`}
+          >
+            Mentra Notes is listening in the background. When it detects a
+            conversation, it will appear here.
           </div>
           {isRecording && (
             <div className="flex items-center mt-1 rounded-[20px] py-2 px-4 gap-2 bg-[#FEF2F2]">
               <div className="shrink-0 rounded-sm bg-[#EF4444] size-2 animate-pulse" />
-              <div className={`text-[13px] leading-4 text-[#DB2627] font-red-hat font-medium`}>
+              <div
+                className={`text-[13px] leading-4 text-[#DB2627] font-red-hat font-medium`}
+              >
                 Microphone active · Listening
               </div>
             </div>
@@ -275,7 +326,10 @@ export function HomePage() {
         />
 
         {/* Global AI Chat */}
-        <GlobalAIChat isOpen={showGlobalChat} onClose={() => setShowGlobalChat(false)} />
+        <GlobalAIChat
+          isOpen={showGlobalChat}
+          onClose={() => setShowGlobalChat(false)}
+        />
 
         {/* Tab Bar */}
         <TabBar activeTab="conversations" onNavigate={handleTabNavigate} />
@@ -306,7 +360,9 @@ export function HomePage() {
             >
               <ChevronLeft size={24} className="text-[#78716C]" />
             </button>
-            <h1 className={`text-xl text-[#1C1917] font-red-hat font-bold tracking-tight`}>
+            <h1
+              className={`text-xl text-[#1C1917] font-red-hat font-bold tracking-tight`}
+            >
               Calendar
             </h1>
           </div>
@@ -328,18 +384,29 @@ export function HomePage() {
   return (
     <div className="flex h-full flex-col bg-[#FAFAF9] relative overflow-hidden">
       {/* Header */}
-      <div className="flex flex-col pt-3 gap-3 px-6 shrink-0">
-        <div className={`text-[11px] tracking-widest leading-3.5 uppercase text-[#DC2626] font-red-hat font-bold`}>
+      <div className="flex flex-col pt-3 gap-3 px-6 shrink-0" style={{ opacity: tabOpacity, transition: "opacity 0.3s ease-in-out" }}>
+        <div
+          className={`text-[11px] tracking-widest leading-3.5 uppercase text-[#DC2626] font-red-hat font-bold`}
+        >
           Mentra Notes
         </div>
         <div className="flex items-end justify-between">
           <div className="flex flex-col gap-0.5">
-            <div className={`text-[30px] tracking-[-0.03em] leading-[34px] text-[#1C1917] font-red-hat font-extrabold`}>
-              {activeTimeFilter === "conversations" ? "Conversations" : "Transcripts"}
+            <div
+              className={`text-[30px] tracking-[-0.03em] leading-[34px] text-[#1C1917] font-red-hat font-extrabold`}
+            >
+              {renderedFilter === "conversations" ? "Conversations" : "Transcripts"}
             </div>
-            {activeTimeFilter === "conversations" && todayConversationCount > 0 && (
+            {renderedFilter === "conversations" && todayConversationCount > 0 && (
               <div className={`text-[14px] leading-[18px] text-[#A8A29E] font-red-hat`}>
-                Today · {todayConversationCount} {todayConversationCount === 1 ? "conversation" : "conversations"}
+                Today · {todayConversationCount}{" "}
+                {todayConversationCount === 1 ? "conversation" : "conversations"}
+              </div>
+            )}
+            {renderedFilter === "transcripts" && availableDates.length > 0 && (
+              <div className={`text-[14px] leading-[18px] text-[#A8A29E] font-red-hat`}>
+                {availableDates.length}{" "}
+                {availableDates.length === 1 ? "day" : "days"} recorded
               </div>
             )}
           </div>
@@ -351,20 +418,48 @@ export function HomePage() {
               className="flex items-center justify-center w-[34px] h-[34px] rounded-[10px] bg-[#F5F5F4] shrink-0"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" stroke="#78716C" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <path
+                  d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"
+                  stroke="#78716C"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
               </svg>
             </button>
 
             {/* List/Calendar toggle */}
             <div className="flex items-center rounded-[10px] py-[3px] px-[3px] bg-[#F5F5F4]">
               {/* List view (active) */}
-              <button
-                className="flex items-center justify-center w-[34px] h-[30px] rounded-lg shrink-0 bg-[#1C1917]"
-              >
+              <button className="flex items-center justify-center w-[34px] h-[30px] rounded-lg shrink-0 bg-[#1C1917]">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                  <line x1="3" y1="6" x2="21" y2="6" stroke="#FAFAF9" strokeWidth="2" strokeLinecap="round" />
-                  <line x1="3" y1="12" x2="21" y2="12" stroke="#FAFAF9" strokeWidth="2" strokeLinecap="round" />
-                  <line x1="3" y1="18" x2="21" y2="18" stroke="#FAFAF9" strokeWidth="2" strokeLinecap="round" />
+                  <line
+                    x1="3"
+                    y1="6"
+                    x2="21"
+                    y2="6"
+                    stroke="#FAFAF9"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                  <line
+                    x1="3"
+                    y1="12"
+                    x2="21"
+                    y2="12"
+                    stroke="#FAFAF9"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                  <line
+                    x1="3"
+                    y1="18"
+                    x2="21"
+                    y2="18"
+                    stroke="#FAFAF9"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
                 </svg>
               </button>
               {/* Calendar view (inactive) */}
@@ -373,10 +468,41 @@ export function HomePage() {
                 className="flex items-center justify-center w-[34px] h-[30px] rounded-lg shrink-0"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                  <rect x="3" y="4" width="18" height="18" rx="2" stroke="#78716C" strokeWidth="2" />
-                  <line x1="3" y1="10" x2="21" y2="10" stroke="#78716C" strokeWidth="2" />
-                  <line x1="8" y1="2" x2="8" y2="6" stroke="#78716C" strokeWidth="2" strokeLinecap="round" />
-                  <line x1="16" y1="2" x2="16" y2="6" stroke="#78716C" strokeWidth="2" strokeLinecap="round" />
+                  <rect
+                    x="3"
+                    y="4"
+                    width="18"
+                    height="18"
+                    rx="2"
+                    stroke="#78716C"
+                    strokeWidth="2"
+                  />
+                  <line
+                    x1="3"
+                    y1="10"
+                    x2="21"
+                    y2="10"
+                    stroke="#78716C"
+                    strokeWidth="2"
+                  />
+                  <line
+                    x1="8"
+                    y1="2"
+                    x2="8"
+                    y2="6"
+                    stroke="#78716C"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                  <line
+                    x1="16"
+                    y1="2"
+                    x2="16"
+                    y2="6"
+                    stroke="#78716C"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
                 </svg>
               </button>
             </div>
@@ -385,114 +511,72 @@ export function HomePage() {
       </div>
 
       {/* Tab switcher */}
-      <div className="flex items-center pt-4 gap-2 px-6 shrink-0">
+      <div className="flex items-center pt-4 gap-2 px-6 shrink-0" style={{ opacity: tabOpacity, transition: "opacity 0.3s ease-in-out" }}>
         <button
           onClick={() => setActiveTimeFilter("conversations")}
           className={`flex items-center rounded-[20px] py-[7px] px-4 ${
-            activeTimeFilter === "conversations" ? "bg-[#1C1917]" : "bg-[#F5F5F4]"
+            renderedFilter === "conversations"
+              ? "bg-[#1C1917]"
+              : "bg-[#F5F5F4]"
           }`}
         >
-          <span className={`text-[13px] leading-4 font-red-hat ${
-            activeTimeFilter === "conversations" ? "text-[#FAFAF9] font-semibold" : "text-[#78716C] font-medium"
-          }`}>
+          <span
+            className={`text-[13px] leading-4 font-red-hat ${
+              renderedFilter === "conversations"
+                ? "text-[#FAFAF9] font-semibold"
+                : "text-[#78716C] font-medium"
+            }`}
+          >
             Conversations
           </span>
         </button>
         <button
           onClick={() => setActiveTimeFilter("transcripts")}
           className={`flex items-center rounded-[20px] py-[7px] px-4 ${
-            activeTimeFilter === "transcripts" ? "bg-[#1C1917]" : "bg-[#F5F5F4]"
+            renderedFilter === "transcripts" ? "bg-[#1C1917]" : "bg-[#F5F5F4]"
           }`}
         >
-          <span className={`text-[13px] leading-4 font-red-hat ${
-            activeTimeFilter === "transcripts" ? "text-[#FAFAF9] font-semibold" : "text-[#78716C] font-medium"
-          }`}>
+          <span
+            className={`text-[13px] leading-4 font-red-hat ${
+              renderedFilter === "transcripts"
+                ? "text-[#FAFAF9] font-semibold"
+                : "text-[#78716C] font-medium"
+            }`}
+          >
             Transcripts
           </span>
         </button>
       </div>
 
-      {/* Content area */}
+      {/* Content area — single wrapper fades out/in on tab switch */}
       <div className="flex-1 overflow-hidden">
-        {activeTimeFilter === "transcripts" ? (
-          /* Transcript dates list */
-          <div className="h-full overflow-y-auto px-6 pb-32">
-            {availableDates.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 gap-3">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#D6D3D1" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                  <line x1="12" y1="19" x2="12" y2="23" />
-                  <line x1="8" y1="23" x2="16" y2="23" />
-                </svg>
-                <span className={`text-[14px] text-[#A8A29E] font-red-hat`}>No transcripts yet</span>
-              </div>
-            ) : (
-              [...availableDates].sort((a, b) => b.localeCompare(a)).map((dateStr, i, arr) => {
-                const [year, month, day] = dateStr.split("-").map(Number);
-                const dateObj = new Date(year, month - 1, day);
-                const today = isToday(dateObj);
-                const yesterday = isYesterday(dateObj);
-                const label = today ? "Today" : yesterday ? "Yesterday" : format(dateObj, "EEE, MMM d");
-                const file = files.find((f) => f.date === dateStr);
-                const segCount = file?.transcriptSegmentCount ?? 0;
-                const hourCount = file?.transcriptHourCount ?? 0;
-
-                return (
-                  <button
-                    key={dateStr}
-                    onClick={() => setLocation(`/transcript/${dateStr}`)}
-                    className={`flex items-center py-4 gap-3 w-full text-left ${
-                      i < arr.length - 1 ? "border-b border-[#F5F5F4]" : ""
-                    }`}
-                  >
-                    {/* Mic icon */}
-                    <div className={`flex items-center justify-center shrink-0 rounded-xl size-10 ${today ? "bg-[#FEE2E2]" : "bg-[#F5F5F4]"}`}>
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={today ? "#DC2626" : "#78716C"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                        <line x1="12" y1="19" x2="12" y2="23" />
-                        <line x1="8" y1="23" x2="16" y2="23" />
-                      </svg>
-                    </div>
-                    {/* Content */}
-                    <div className="flex flex-col grow shrink basis-0 gap-0.5 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-[15px] leading-5 text-[#1C1917] font-red-hat font-semibold`}>
-                          {label}
-                        </span>
-                        {today && isRecording && (
-                          <div className="flex items-center rounded-md py-[2px] px-1.5 gap-1 bg-[#FEE2E2]">
-                            <div className="w-1.5 h-1.5 rounded-full bg-[#DC2626] animate-pulse" />
-                            <span className={`text-[10px] leading-3 text-[#DC2626] font-red-hat font-semibold`}>Live</span>
-                          </div>
-                        )}
-                      </div>
-                      <span className={`text-[13px] leading-4 text-[#A8A29E] font-red-hat`}>
-                        {segCount} segments{hourCount > 0 ? ` · ${hourCount} ${hourCount === 1 ? "hour" : "hours"}` : ""}
-                      </span>
-                    </div>
-                    {/* Chevron */}
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="shrink-0">
-                      <path d="m9 18 6-6-6-6" stroke="#D6D3D1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </button>
-                );
-              })
-            )}
-          </div>
-        ) : (
-          /* Conversation list */
-          <ConversationList
-            conversations={filteredConversations}
-            onSelectConversation={handleSelectConversation}
-            onArchive={handleArchiveConversation}
-            onDelete={handleDeleteConversation}
-          />
-        )}
+        <div
+          className="h-full"
+          style={{
+            opacity: tabOpacity,
+            transition: "opacity 0.3s ease-in-out",
+          }}
+        >
+          {renderedFilter === "transcripts" ? (
+            <div className="h-full overflow-y-auto px-6 pb-32">
+              <TranscriptList
+                availableDates={availableDates}
+                files={files}
+                isRecording={isRecording}
+                transcriptionPaused={transcriptionPaused}
+                onSelect={(dateStr) => setLocation(`/transcript/${dateStr}`)}
+              />
+            </div>
+          ) : (
+            <ConversationList
+              conversations={filteredConversations}
+              onSelectConversation={handleSelectConversation}
+              onArchive={handleArchiveConversation}
+              onDelete={handleDeleteConversation}
+            />
+          )}
+        </div>
       </div>
-
-
 
       {/* FAB */}
       <FABMenu
@@ -518,7 +602,10 @@ export function HomePage() {
       <TabBar activeTab="conversations" onNavigate={handleTabNavigate} />
 
       {/* Global AI Chat */}
-      <GlobalAIChat isOpen={showGlobalChat} onClose={() => setShowGlobalChat(false)} />
+      <GlobalAIChat
+        isOpen={showGlobalChat}
+        onClose={() => setShowGlobalChat(false)}
+      />
 
       {/* Empty Trash Confirmation */}
       <Drawer.Root
@@ -530,13 +617,17 @@ export function HomePage() {
           <Drawer.Content className="bg-white flex flex-col rounded-t-2xl mt-24 fixed bottom-0 left-0 right-0 z-50 max-w-lg mx-auto outline-none border-t border-[#E7E5E4]">
             <div className="mx-auto w-12 h-1.5 shrink-0 rounded-full bg-[#D6D3D1] mt-4 mb-2" />
             <div className="px-6 pb-8 pt-4">
-              <Drawer.Title className={`text-lg font-semibold text-[#1C1917] text-center font-red-hat`}>
+              <Drawer.Title
+                className={`text-lg font-semibold text-[#1C1917] text-center font-red-hat`}
+              >
                 Empty Trash?
               </Drawer.Title>
-              <Drawer.Description className={`text-sm text-[#A8A29E] text-center mt-3 font-red-hat`}>
-                You are about to permanently delete all {filterCounts.trash} items in trash.
-                This will remove all transcripts, notes, and chat history.
-                You will not be able to recover them.
+              <Drawer.Description
+                className={`text-sm text-[#A8A29E] text-center mt-3 font-red-hat`}
+              >
+                You are about to permanently delete all {filterCounts.trash}{" "}
+                items in trash. This will remove all transcripts, notes, and
+                chat history. You will not be able to recover them.
               </Drawer.Description>
               <div className="flex gap-3 mt-6">
                 <button
@@ -562,4 +653,3 @@ export function HomePage() {
 }
 
 /** Top-right overflow/minimize menu (from Paper design) */
-

@@ -7,10 +7,11 @@
 
 import { format } from "date-fns";
 import { motion, useMotionValue, useTransform, type PanInfo } from "motion/react";
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import type { Conversation } from "../../../../shared/types";
 
 const SWIPE_THRESHOLD = 80;
+const AUTO_CLOSE_DELAY = 6000; // 6 seconds
 
 interface ConversationRowProps {
   conversation: Conversation;
@@ -40,22 +41,54 @@ export function ConversationRow({
   const x = useMotionValue(0);
   const [isSwiped, setIsSwiped] = useState(false);
   const constraintsRef = useRef<HTMLDivElement>(null);
+  const isDraggingRef = useRef(false);
+  const autoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Map swipe offset to action button widths
   const archiveOpacity = useTransform(x, [-SWIPE_THRESHOLD, -20], [1, 0]);
   const deleteOpacity = useTransform(x, [-SWIPE_THRESHOLD * 2, -SWIPE_THRESHOLD], [1, 0]);
 
-  const handleDragEnd = (_: unknown, info: PanInfo) => {
-    if (info.offset.x < -SWIPE_THRESHOLD) {
-      setIsSwiped(true);
-    } else {
-      setIsSwiped(false);
+  const clearAutoClose = () => {
+    if (autoCloseTimerRef.current) {
+      clearTimeout(autoCloseTimerRef.current);
+      autoCloseTimerRef.current = null;
     }
   };
 
+  const startAutoClose = () => {
+    clearAutoClose();
+    autoCloseTimerRef.current = setTimeout(() => {
+      setIsSwiped(false);
+    }, AUTO_CLOSE_DELAY);
+  };
+
+  useEffect(() => {
+    return () => clearAutoClose();
+  }, []);
+
+  const handleDragStart = () => {
+    isDraggingRef.current = true;
+    clearAutoClose();
+  };
+
+  const handleDragEnd = (_: unknown, info: PanInfo) => {
+    if (info.offset.x < -SWIPE_THRESHOLD) {
+      setIsSwiped(true);
+      startAutoClose();
+    } else {
+      setIsSwiped(false);
+    }
+    // Keep flag true briefly so onTap doesn't fire on the same gesture
+    setTimeout(() => {
+      isDraggingRef.current = false;
+    }, 50);
+  };
+
   const handleTap = () => {
+    if (isDraggingRef.current) return;
     if (isSwiped) {
       setIsSwiped(false);
+      clearAutoClose();
     } else {
       onSelect(conversation);
     }
@@ -103,6 +136,7 @@ export function ConversationRow({
         style={{ x }}
         animate={{ x: isSwiped ? -146 : 0 }}
         transition={{ type: "spring", damping: 25, stiffness: 300 }}
+        onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
         onTap={handleTap}
         className={`flex items-center py-3.5 gap-3.5 bg-[#FAFAF9] relative z-10 ${

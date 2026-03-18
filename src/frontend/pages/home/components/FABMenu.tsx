@@ -3,11 +3,11 @@
  *
  * Default: Red "+" button
  * Expanded: X close button + stacked action pills (Ask AI, Add manual note, Stop/Resume transcribing)
+ *
+ * Uses CSS transitions only (no framer-motion) for zero-lag first press.
  */
 
 import { useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
-
 
 interface FABMenuProps {
   transcriptionPaused: boolean;
@@ -91,65 +91,53 @@ export function FABMenu({
   return (
     <>
       {/* Backdrop */}
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
-            onClick={() => setIsOpen(false)}
-            className="fixed inset-0 bg-black/20 z-40"
-          />
-        )}
-      </AnimatePresence>
+      <div
+        onClick={() => setIsOpen(false)}
+        className="fixed inset-0 z-40"
+        style={{
+          backgroundColor: "rgba(0,0,0,0.2)",
+          opacity: isOpen ? 1 : 0,
+          pointerEvents: isOpen ? "auto" : "none",
+          transition: "opacity 0.15s ease",
+        }}
+      />
 
       {/* FAB container */}
       <div className="absolute bottom-[104px] right-6 z-50 flex flex-col items-end gap-2.5">
         {/* Action pills */}
-        <AnimatePresence>
-          {isOpen &&
-            actions.map((action, i) => (
-              <motion.button
-                key={action.id}
-                initial={{ opacity: 0, y: 20, scale: 0.9 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                transition={{
-                  duration: 0.2,
-                  delay: i * 0.04,
-                  ease: [0.25, 0.46, 0.45, 0.94],
-                }}
-                onClick={action.onClick}
-                className={`flex items-center gap-2.5 py-2.5 px-[18px] h-11 ${action.bg} [box-shadow:#0000001A_0px_2px_12px] rounded-xl`}
-              >
-                <span className={`text-[15px] leading-5 ${action.textColor} font-red-hat ${action.fontWeight}`}>
-                  {action.label}
-                </span>
-                {action.icon}
-              </motion.button>
-            ))}
-        </AnimatePresence>
+        {actions.map((action, i) => (
+          <button
+            key={action.id}
+            onClick={action.onClick}
+            className={`flex items-center gap-2.5 py-2.5 px-[18px] h-11 ${action.bg} [box-shadow:#0000001A_0px_2px_12px] rounded-xl`}
+            style={{
+              opacity: isOpen ? 1 : 0,
+              transform: isOpen ? "translateY(0) scale(1)" : "translateY(16px) scale(0.92)",
+              pointerEvents: isOpen ? "auto" : "none",
+              transition: `opacity 0.18s ease ${i * 0.04}s, transform 0.18s cubic-bezier(0.25,0.46,0.45,0.94) ${i * 0.04}s`,
+            }}
+          >
+            <span className={`text-[15px] leading-5 ${action.textColor} font-red-hat ${action.fontWeight}`}>
+              {action.label}
+            </span>
+            {action.icon}
+          </button>
+        ))}
 
         {/* Main FAB button */}
-        <motion.button
+        <button
           onClick={() => setIsOpen((v) => !v)}
-          animate={{ rotate: isOpen ? 45 : 0 }}
-          transition={{ duration: 0.2, ease: "easeInOut" }}
           className="flex items-center justify-center w-[52px] h-[52px] rounded-2xl bg-[#DC2626] [box-shadow:#DC262640_0px_4px_16px]"
+          style={{
+            transform: `rotate(${isOpen ? 45 : 0}deg)`,
+            transition: "transform 0.2s ease-in-out",
+          }}
         >
-          {isOpen ? (
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-              <line x1="18" y1="6" x2="6" y2="18" stroke="#FAFAF9" strokeWidth="2.5" strokeLinecap="round" />
-              <line x1="6" y1="6" x2="18" y2="18" stroke="#FAFAF9" strokeWidth="2.5" strokeLinecap="round" />
-            </svg>
-          ) : (
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          )}
-        </motion.button>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        </button>
       </div>
     </>
   );
