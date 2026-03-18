@@ -45,6 +45,8 @@ export interface HourSummary {
   updatedAt: Date;
 }
 
+const INTERIM_WORD_THRESHOLD = 50;
+
 // =============================================================================
 // Manager
 // =============================================================================
@@ -62,6 +64,9 @@ export class TranscriptManager extends SyncedManager {
   private pendingSegments: TranscriptSegmentI[] = [];
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private timeManager: TimeManager | null = null;
+  private _forceFinalizedWordCount = 0;
+  private _pendingForceFinalize = false; // true = threshold hit, waiting for next word to complete
+  private _pendingForceFinalizeSnapshot = 0; // word count when threshold was hit
 
   // ===========================================================================
   // Private Helpers
@@ -237,12 +242,75 @@ export class TranscriptManager extends SyncedManager {
     const wasRecording = this.isRecording;
     this.isRecording = true;
 
+    let isForceFinalize = false;
+
     if (!isFinal) {
-      this.interimText = text;
-      return;
+      // Strip already-finalized words from the interim
+      const interimWords = text.trim().split(/\s+/);
+
+      // If the speech engine reset its buffer (fewer words than we've finalized),
+      // it likely emitted a final we missed — reset and treat this as fresh
+      if (this._forceFinalizedWordCount > 0 && interimWords.length < this._forceFinalizedWordCount) {
+        console.log(`[TranscriptManager] Speech engine reset detected (got ${interimWords.length} words, expected >${this._forceFinalizedWordCount}). Resetting force-finalize state.`);
+        this._forceFinalizedWordCount = 0;
+        this._pendingForceFinalize = false;
+        this._pendingForceFinalizeSnapshot = 0;
+      }
+
+      const cleanWords = interimWords.slice(this._forceFinalizedWordCount);
+      const cleanInterim = cleanWords.join(" ");
+
+      if (this._pendingForceFinalize) {
+        // Threshold was hit on a previous interim — wait for the last word to complete
+        // Once the word count grows (speech engine moved to next word), finalize
+        if (interimWords.length > this._pendingForceFinalizeSnapshot) {
+          // The last word from the snapshot is now complete — finalize up to it
+          const finalizeWords = interimWords.slice(this._forceFinalizedWordCount, this._pendingForceFinalizeSnapshot);
+          const finalizeText = finalizeWords.join(" ");
+          console.log(`[TranscriptManager] Force-finalizing interim (${finalizeWords.length} words)`);
+          this._forceFinalizedWordCount = this._pendingForceFinalizeSnapshot;
+          this._pendingForceFinalize = false;
+          this._pendingForceFinalizeSnapshot = 0;
+          text = finalizeText;
+          isForceFinalize = true;
+          // Show remaining words as interim so UI doesn't flash empty
+          this.interimText = interimWords.slice(this._forceFinalizedWordCount).join(" ");
+        } else {
+          // Still on the same last word — keep waiting
+          this.interimText = cleanInterim;
+          return;
+        }
+      } else if (cleanWords.length >= INTERIM_WORD_THRESHOLD) {
+        // Threshold hit — mark pending and wait for next word to confirm last word is complete
+        this._pendingForceFinalize = true;
+        this._pendingForceFinalizeSnapshot = interimWords.length;
+        this.interimText = cleanInterim;
+        return;
+      } else {
+        this.interimText = cleanInterim;
+        return;
+      }
+    } else {
+      // Real final from speech engine — strip already-finalized words
+      if (this._forceFinalizedWordCount > 0) {
+        const finalWords = text.trim().split(/\s+/);
+        text = finalWords.slice(this._forceFinalizedWordCount).join(" ");
+      }
+      this._forceFinalizedWordCount = 0;
+      this._pendingForceFinalize = false;
+      this._pendingForceFinalizeSnapshot = 0;
+
+      // If all words were already force-finalized, nothing left to save
+      if (!text.trim()) {
+        this.interimText = "";
+        return;
+      }
     }
 
-    this.interimText = "";
+    // Only clear interimText for real finals — force-finalize already set it to remaining words
+    if (!isForceFinalize) {
+      this.interimText = "";
+    }
     this.segmentIndex++;
 
     const segment: TranscriptSegment = {
@@ -327,6 +395,9 @@ export class TranscriptManager extends SyncedManager {
   stopRecording(): void {
     this.isRecording = false;
     this.interimText = "";
+    this._forceFinalizedWordCount = 0;
+    this._pendingForceFinalize = false;
+    this._pendingForceFinalizeSnapshot = 0;
   }
 
   /**
@@ -336,7 +407,13 @@ export class TranscriptManager extends SyncedManager {
   finalizeInterim(): void {
     if (this.interimText.trim()) {
       console.log(`[TranscriptManager] Finalizing interim text: "${this.interimText.slice(0, 60)}"`);
-      this.addSegment(this.interimText, true);
+      // interimText is already stripped of force-finalized words, so save it directly
+      // Reset force-finalize state first so addSegment doesn't double-strip
+      const textToSave = this.interimText.trim();
+      this._forceFinalizedWordCount = 0;
+      this._pendingForceFinalize = false;
+      this._pendingForceFinalizeSnapshot = 0;
+      this.addSegment(textToSave, true);
     }
     this.stopRecording();
   }
