@@ -111,7 +111,7 @@ export function NotesPage() {
     return (
       <div className="flex h-full flex-col bg-[#FAFAF9] relative overflow-hidden">
         {/* Header */}
-        <div className="flex flex-col pt-6 gap-2 px-6 shrink-0">
+        <div className="flex flex-col pt-3 gap-2 px-6 shrink-0">
           <div className={`text-[11px] tracking-widest uppercase leading-3.5 text-[#DC2626] font-red-hat font-bold`}>
             MENTRA NOTES
           </div>
@@ -237,7 +237,7 @@ export function NotesPage() {
   return (
     <div className="flex h-full flex-col bg-[#FAFAF9] relative overflow-hidden">
       {/* Header */}
-      <div className="flex flex-col pt-6 gap-2 px-6 shrink-0">
+      <div className="flex flex-col pt-3 gap-2 px-6 shrink-0">
         <div className={`text-[11px] tracking-widest uppercase leading-3.5 text-[#DC2626] font-red-hat font-bold`}>
           Mentra Notes
         </div>

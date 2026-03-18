@@ -256,14 +256,23 @@ export class TranscriptManager extends SyncedManager {
 
     this.segments.mutate((s) => s.push(segment));
 
-    // Notify FileManager
+    // Notify FileManager and update availableDates
+    const today = this.getTimeManager().today();
     const fileManager = this.getFileManager();
     if (fileManager) {
-      const today = this.getTimeManager().today();
       if (!wasRecording) {
         fileManager.onTranscriptStarted(today);
       }
       fileManager.onSegmentAdded(today, this.segments.length);
+    }
+
+    // Ensure today appears in availableDates for the Transcripts tab
+    if (!wasRecording && !this.availableDates.includes(today)) {
+      this.availableDates.mutate((dates) => {
+        if (!dates.includes(today)) {
+          dates.unshift(today);
+        }
+      });
     }
 
     this.pendingSegments.push({

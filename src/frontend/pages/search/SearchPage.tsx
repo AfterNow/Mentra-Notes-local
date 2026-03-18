@@ -249,7 +249,7 @@ export function SearchPage() {
       )}
 
       {/* Scrollable results */}
-      <div className="flex-1 overflow-y-auto flex jsutify-center ">
+      <div className="flex-1 overflow-y-auto flex flex-col jsutify-center ">
         {/* Loading */}
         {isSearching && (
           <div className="flex flex-col items-center justify-center flex-1 min-h-[300px]">
