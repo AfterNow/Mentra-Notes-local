@@ -38,6 +38,7 @@ export {
   getNotesByDateRange,
   deleteNotesByDate,
   unassignNotesFromFolder,
+  deleteTrashedNotes,
 } from "./note.model";
 
 // Folder

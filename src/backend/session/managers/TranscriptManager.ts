@@ -140,8 +140,8 @@ export class TranscriptManager extends SyncedManager {
         console.log(`[TranscriptManager] No R2 manager available`);
       }
 
-      // Merge and dedupe dates, sort descending
-      const allDates = Array.from(new Set([...mongoDbDates, ...r2Dates]));
+      // Merge and dedupe dates, always include today, sort descending
+      const allDates = Array.from(new Set([today, ...mongoDbDates, ...r2Dates]));
       allDates.sort((a, b) => b.localeCompare(a));
       console.log(`[TranscriptManager] All available dates:`, allDates);
       this.availableDates.set(allDates);
@@ -526,7 +526,34 @@ export class TranscriptManager extends SyncedManager {
         console.log(`[TranscriptManager] ✗ No R2 manager available`);
       }
 
-      // Not found in R2
+      // Not found in R2 — also try MongoDB as last resort (segments not yet migrated)
+      const { getDailyTranscript } = await import("../../models");
+      const userId = this._session?.userId;
+      if (userId) {
+        const dailyTranscript = await getDailyTranscript(userId, date);
+        if (dailyTranscript?.segments?.length) {
+          const loadedSegments: TranscriptSegment[] = dailyTranscript.segments.map(
+            (seg, idx) => ({
+              id: `seg_${idx + 1}`,
+              text: seg.text,
+              timestamp: seg.timestamp,
+              isFinal: seg.isFinal,
+              speakerId: seg.speakerId,
+              type: seg.type,
+              photoUrl: seg.photoUrl,
+              photoMimeType: seg.photoMimeType,
+              timezone: seg.timezone,
+            }),
+          );
+          this.segments.set(loadedSegments);
+          this.loadedDate = date;
+          this.isLoadingHistory = false;
+          console.log(`[TranscriptManager] ✓ MongoDB fallback: ${loadedSegments.length} segments for ${date}`);
+          return { segments: loadedSegments, hourSummaries: [] };
+        }
+      }
+
+      // Truly not found anywhere
       console.log(`[TranscriptManager] ✗ No transcript found for ${date}`);
       this.segments.set([]);
       this.loadedDate = date;
@@ -540,7 +567,9 @@ export class TranscriptManager extends SyncedManager {
         error,
       );
       this.isLoadingHistory = false;
-      throw error;
+      this.segments.set([]);
+      this.loadedDate = date;
+      return { segments: [], hourSummaries: [] };
     }
   }
 

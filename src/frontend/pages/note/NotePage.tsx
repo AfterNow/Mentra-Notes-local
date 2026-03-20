@@ -18,10 +18,10 @@ import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import Image from "@tiptap/extension-image";
-import { Drawer } from "vaul";
 import { useSynced } from "../../hooks/useSynced";
 import type { SessionI, Note, FolderColor } from "../../../shared/types";
 import { FolderPicker } from "./FolderPicker";
+import { DropdownMenu, type DropdownMenuOption } from "../../components/shared/DropdownMenu";
 
 const FOLDER_COLOR_MAP: Record<FolderColor, string> = {
   red: "#DC2626",
@@ -94,9 +94,7 @@ export function NotePage() {
   const { session } = useSynced<SessionI>(userId || "");
 
   const [editTitle, setEditTitle] = useState("");
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showEmailDrawer, setShowEmailDrawer] = useState(false);
-  const [showMenu, setShowMenu] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showSaved, setShowSaved] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -288,16 +286,6 @@ export function NotePage() {
     setLocation("/notes");
   };
 
-  const handleDelete = async () => {
-    if (!session?.notes?.deleteNote) return;
-    try {
-      await session.notes.deleteNote(noteId);
-      setLocation("/notes");
-    } catch (err) {
-      console.error("[NotePage] Failed to delete note:", err);
-    }
-  };
-
   const handleEmailSend = async (to: string, cc: string) => {
     if (!note) return;
     const ccList = cc ? cc.split(",").filter(Boolean) : undefined;
@@ -379,85 +367,84 @@ export function NotePage() {
           <span className={`text-[11px] text-[#A8A29E] font-red-hat`}>
             {isSaving ? "Saving..." : showSaved ? "Saved" : ""}
           </span>
-          {/* Favorite star */}
-          <button className="p-1">
+          {/* Export button */}
+          <button onClick={() => setShowEmailDrawer(true)} className="p-1">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-              {/* <path
-                d="M12 2l2.09 6.26L20.18 9l-4.91 3.74L17.18 19 12 15.27 6.82 19l1.91-6.26L3.82 9l6.09-.74z"
-                stroke="#1C1917"
-                strokeWidth="1.75"
-                fill="none"
-              /> */}
+              <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" stroke="#52525B" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+              <polyline points="16,6 12,2 8,6" stroke="#52525B" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+              <line x1="12" y1="2" x2="12" y2="15" stroke="#52525B" strokeWidth="1.75" strokeLinecap="round" />
             </svg>
           </button>
           {/* More menu */}
-          <div className="relative">
-            <button onClick={() => setShowMenu(!showMenu)} className="p-1">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                <circle cx="12" cy="5" r="1.5" fill="#1C1917" />
-                <circle cx="12" cy="12" r="1.5" fill="#1C1917" />
-                <circle cx="12" cy="19" r="1.5" fill="#1C1917" />
-              </svg>
-            </button>
-            {showMenu && (
-              <>
-                <div
-                  className="fixed inset-0 z-40"
-                  onClick={() => setShowMenu(false)}
-                />
-                <div
-                  className={`absolute right-0 top-full mt-1 z-50 bg-white border border-[#E7E5E4] rounded-xl shadow-lg py-1 min-w-40 font-red-hat`}
-                >
-                  <button
-                    onClick={() => {
-                      setShowMenu(false);
-                      setShowEmailDrawer(true);
-                    }}
-                    className="w-full px-4 py-2.5 text-left text-[14px] text-[#1C1917] flex items-center gap-3"
-                  >
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="#78716C"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
-                      <polyline points="22,6 12,13 2,6" />
+          <DropdownMenu
+            options={(() => {
+              const isFav = note?.isFavourite ?? false;
+              const isArchived = note?.isArchived ?? false;
+              const isTrashed = note?.isTrashed ?? false;
+
+              const items: DropdownMenuOption[] = [
+                {
+                  id: "favourite",
+                  label: isFav ? "Unfavourite" : "Favourite",
+                  icon: (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill={isFav ? "#DC2626" : "none"} stroke={isFav ? "#DC2626" : "#78716C"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                     </svg>
-                    Send Email
-                  </button>
-                  <div className="my-1 border-t border-[#E7E5E4]" />
-                  <button
-                    onClick={() => {
-                      setShowMenu(false);
-                      setShowDeleteConfirm(true);
-                    }}
-                    className="w-full px-4 py-2.5 text-left text-[14px] text-[#DC2626] flex items-center gap-3"
-                  >
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="#DC2626"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
+                  ),
+                  onClick: async () => {
+                    if (!session?.notes || !note) return;
+                    if (isFav) {
+                      await session.notes.unfavouriteNote(note.id);
+                    } else {
+                      await session.notes.favouriteNote(note.id);
+                    }
+                  },
+                },
+                {
+                  id: "archive",
+                  label: isArchived ? "Unarchive" : "Archive",
+                  icon: (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#78716C" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 8v13H3V8" />
+                      <rect x="1" y="3" width="22" height="5" rx="1" />
+                      <line x1="10" y1="12" x2="14" y2="12" />
+                    </svg>
+                  ),
+                  onClick: async () => {
+                    if (!session?.notes || !note) return;
+                    if (isArchived) {
+                      await session.notes.unarchiveNote(note.id);
+                    } else {
+                      await session.notes.archiveNote(note.id);
+                    }
+                  },
+                },
+                { type: "divider" },
+                {
+                  id: "trash",
+                  label: isTrashed ? "Untrash" : "Trash",
+                  danger: !isTrashed,
+                  icon: (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={isTrashed ? "#78716C" : "#DC2626"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M3 6h18" />
                       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
                       <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                     </svg>
-                    Delete Note
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
+                  ),
+                  onClick: async () => {
+                    if (!session?.notes || !note) return;
+                    if (isTrashed) {
+                      await session.notes.untrashNote(note.id);
+                    } else {
+                      await session.notes.trashNote(note.id);
+                      setLocation("/notes");
+                    }
+                  },
+                },
+              ];
+              return items;
+            })()}
+          />
         </div>
       </div>
 
@@ -730,45 +717,6 @@ export function NotePage() {
           </>
         )}
       </div>
-
-      {/* Delete Confirmation Drawer */}
-      <Drawer.Root open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-        <Drawer.Portal>
-          <Drawer.Overlay className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50" />
-          <Drawer.Content className="bg-[#FAFAF9] flex flex-col rounded-t-2xl mt-24 fixed bottom-0 left-0 right-0 z-50 max-w-lg mx-auto outline-none border-t border-[#E7E5E4]">
-            <div className="mx-auto w-12 h-1.5 shrink-0 rounded-full bg-[#D6D3D1] mt-4 mb-2" />
-            <div className="px-6 pb-8 pt-4">
-              <Drawer.Title
-                className={`text-lg font-semibold text-[#1C1917] text-center font-red-hat`}
-              >
-                Delete Note?
-              </Drawer.Title>
-              <Drawer.Description
-                className={`text-sm text-[#A8A29E] text-center mt-3 font-red-hat`}
-              >
-                This action cannot be undone. The note will be permanently
-                deleted.
-              </Drawer.Description>
-              <div className="flex gap-3 mt-6">
-                <Drawer.Close asChild>
-                  <button
-                    className={`flex-1 py-3 rounded-xl font-medium bg-[#F5F5F4] text-[#78716C] font-red-hat`}
-                  >
-                    Cancel
-                  </button>
-                </Drawer.Close>
-                <button
-                  onClick={handleDelete}
-                  className={`flex-1 py-3 rounded-xl font-medium bg-[#DC2626] text-white font-red-hat`}
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-            <div className="h-safe-area-bottom" />
-          </Drawer.Content>
-        </Drawer.Portal>
-      </Drawer.Root>
 
       {/* Email Drawer */}
       <EmailDrawer

@@ -17,6 +17,7 @@ import { useSynced } from "../../hooks/useSynced";
 import { WaveIndicator } from "../../components/shared/WaveIndicator";
 import type { SessionI, Conversation, ConversationChunk, ConversationSegment, TranscriptSegment } from "../../../shared/types";
 import { DropdownMenu, type DropdownMenuOption } from "../../components/shared/DropdownMenu";
+import { LoadingState } from "../../components/shared/LoadingState";
 
 /** Stable speakerId string → sequential color index (first seen = 0, second = 1, …) */
 function buildSpeakerMap(segments: (TranscriptSegment | ConversationSegment)[]): Map<string, number> {
@@ -96,6 +97,18 @@ export function ConversationDetailPage() {
 
   // No auto-scroll on detail page — active state is non-scrollable
   useEffect(() => { void transcriptBottomRef; }, []);
+
+  // Load segments on-demand for ended conversations (not loaded during hydration)
+  const [loadingSegments, setLoadingSegments] = useState(false);
+  useEffect(() => {
+    if (!conversation || !session?.conversation?.loadConversationSegments) return;
+    if (conversation.status === "active" || conversation.status === "paused") return;
+    if (conversation.segments && conversation.segments.length > 0) return;
+    setLoadingSegments(true);
+    session.conversation.loadConversationSegments(conversation.id)
+      .catch(() => {})
+      .finally(() => setLoadingSegments(false));
+  }, [conversation?.id, conversation?.status, conversation?.segments?.length, session?.conversation]);
 
   if (!session || !conversation) {
     return (
@@ -408,6 +421,10 @@ export function ConversationDetailPage() {
                 </button>
               )}
             </>
+          ) : loadingSegments ? (
+            <div className="flex flex-col items-center justify-center py-8">
+              <LoadingState size={80} cycleMessages />
+            </div>
           ) : (
             <div className={`text-[13px] text-[#A8A29E] font-red-hat`}>
               No transcript recorded

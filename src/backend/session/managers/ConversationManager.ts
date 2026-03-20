@@ -39,6 +39,7 @@ export class ConversationManager extends SyncedManager {
   private conversationTracker: ConversationTracker | null = null;
   private llmProvider: AgentProvider | null = null;
   private timeManager: TimeManager | null = null;
+  private segmentCache = new Map<string, any[]>(); // Cache R2 segments by date
 
   // =========================================================================
   // Lifecycle
@@ -52,10 +53,26 @@ export class ConversationManager extends SyncedManager {
       const today = this.getTimeManager().today();
 
       // Load all conversations (across all days) for the homepage
+      // Skip segments during hydration — they're loaded on-demand when viewing detail
       const allDbConversations = await getAllConversations(userId);
       const frontendConversations = await Promise.all(
-        allDbConversations.map((c) => this.toFrontendConversation(c)),
+        allDbConversations.map((c) => this.toFrontendConversation(c, { skipSegments: true })),
       );
+
+      // Clear stuck generatingSummary flags and retry missing summaries
+      const needsSummary: ConversationI[] = [];
+      for (const conv of frontendConversations) {
+        if (conv.generatingSummary && conv.status === "ended") {
+          conv.generatingSummary = false;
+          updateConversation(conv.id, { generatingSummary: false }).catch(() => {});
+        }
+        // Collect ended conversations with chunks but no summary for retry
+        if (conv.status === "ended" && !conv.aiSummary && conv.chunks.length > 0) {
+          const dbConv = allDbConversations.find((c) => c._id?.toString() === conv.id);
+          if (dbConv) needsSummary.push(dbConv);
+        }
+      }
+
       this.conversations.set(frontendConversations);
 
       // Find active conversation (only today's can be active)
@@ -127,6 +144,14 @@ export class ConversationManager extends SyncedManager {
       console.log(
         `[ConvManager] Hydrated: ${frontendConversations.length} conversations for ${today} (auto-ended ${staleConversations.length} stale)`,
       );
+
+      // Retry AI summaries for conversations that failed previously (non-blocking)
+      if (needsSummary.length > 0) {
+        console.log(`[ConvManager] Retrying AI summary for ${needsSummary.length} conversations`);
+        for (const conv of needsSummary) {
+          this.generateAISummary(conv).catch(() => {});
+        }
+      }
     } catch (error) {
       console.error("[ConvManager] Failed to hydrate:", error);
     } finally {
@@ -321,6 +346,12 @@ export class ConversationManager extends SyncedManager {
   private async generateAISummary(conv: ConversationI): Promise<void> {
     if (!this.llmProvider) {
       console.warn("[ConvManager] No LLM provider, skipping AI summary");
+      const convId = conv._id!.toString();
+      await updateConversation(convId, { generatingSummary: false }).catch(() => {});
+      this.conversations.mutate((list) => {
+        const idx = list.findIndex((c) => c.id === convId);
+        if (idx >= 0) list[idx].generatingSummary = false;
+      });
       return;
     }
 
@@ -341,6 +372,10 @@ export class ConversationManager extends SyncedManager {
       if (chunks.length === 0) {
         console.warn(`[ConvManager] No chunks for conversation ${convId}, skipping summary`);
         await updateConversation(convId, { generatingSummary: false });
+        this.conversations.mutate((list) => {
+          const idx = list.findIndex((c) => c.id === convId);
+          if (idx >= 0) list[idx].generatingSummary = false;
+        });
         return;
       }
 
@@ -514,6 +549,33 @@ ${transcript}
   }
 
   @rpc
+  async loadConversationSegments(conversationId: string): Promise<ConversationSegment[]> {
+    const conv = (this.conversations as unknown as Conversation[]).find((c) => c.id === conversationId);
+    if (!conv) return [];
+
+    // Already loaded
+    if (conv.segments && conv.segments.length > 0) return conv.segments;
+
+    // Find the DB conversation to get the time range
+    const userId = this._session?.userId;
+    if (!userId) return [];
+
+    const allConvs = await getAllConversations(userId);
+    const dbConv = allConvs.find((c) => c._id?.toString() === conversationId);
+    if (!dbConv) return [];
+
+    const segments = await this.getSegmentsForConversation(dbConv);
+
+    // Update synced state so the frontend gets the segments
+    this.conversations.mutate((list) => {
+      const idx = list.findIndex((c) => c.id === conversationId);
+      if (idx >= 0) list[idx].segments = segments;
+    });
+
+    return segments;
+  }
+
+  @rpc
   async linkNoteToConversation(conversationId: string, noteId: string): Promise<void> {
     await updateConversation(conversationId, { noteId });
     this.conversations.mutate((list) => {
@@ -617,6 +679,7 @@ ${transcript}
 
   private async toFrontendConversation(
     conv: ConversationI,
+    options?: { skipSegments?: boolean },
   ): Promise<Conversation> {
     // Load chunks for this conversation
     const dbChunks = await getChunksByConversationId(conv._id!.toString());
@@ -628,8 +691,10 @@ ${transcript}
       wordCount: c.wordCount,
     }));
 
-    // Get transcript segments (with speaker IDs) from the conversation's time range
-    const segments: ConversationSegment[] = await this.getSegmentsForConversation(conv);
+    // Get transcript segments — skip during bulk hydration (loaded on-demand)
+    const segments: ConversationSegment[] = options?.skipSegments
+      ? []
+      : await this.getSegmentsForConversation(conv);
 
     return {
       id: conv._id!.toString(),
@@ -700,20 +765,36 @@ ${transcript}
         if (filtered.length > 0) return filtered;
       }
 
-      // 3. Try R2 (historical segments migrated to cloud storage)
-      const r2Manager = (this._session as any)?.r2;
-      if (r2Manager) {
-        const r2Data = await r2Manager.fetchTranscript(conv.date);
-        if (r2Data?.segments?.length) {
-          const mapped = r2Data.segments.map((seg: any, idx: number) => ({
-            id: `seg_${seg.index || idx + 1}`,
-            text: seg.text,
-            timestamp: new Date(seg.timestamp),
-            isFinal: seg.isFinal,
-            speakerId: seg.speakerId,
-            type: seg.type,
-          }));
-          return filterAndMap(mapped);
+      // 3. Try R2 (historical segments migrated to cloud storage) — skip for today
+      const today = this.getTimeManager().today();
+      if (conv.date !== today) {
+        // Check cache first
+        if (this.segmentCache.has(conv.date)) {
+          const cached = this.segmentCache.get(conv.date)!;
+          if (cached.length > 0) return filterAndMap(cached);
+        }
+
+        const r2Manager = (this._session as any)?.r2;
+        if (r2Manager) {
+          try {
+            const r2Data = await r2Manager.fetchTranscript(conv.date);
+            if (r2Data?.segments?.length) {
+              const mapped = r2Data.segments.map((seg: any, idx: number) => ({
+                id: `seg_${seg.index || idx + 1}`,
+                text: seg.text,
+                timestamp: new Date(seg.timestamp),
+                isFinal: seg.isFinal,
+                speakerId: seg.speakerId,
+                type: seg.type,
+              }));
+              // Cache for other conversations on the same date
+              this.segmentCache.set(conv.date, mapped);
+              return filterAndMap(mapped);
+            }
+          } catch {
+            // R2 fetch failed — cache empty to avoid retrying
+            this.segmentCache.set(conv.date, []);
+          }
         }
       }
     } catch (error) {

@@ -52,8 +52,10 @@ export function App() {
   const [onboardingResolved, setOnboardingResolved] = useState(false);
   useEffect(() => {
     if (!flagsLoaded) return;
-    // Skip onboarding if the user has already completed it
-    const alreadyCompleted = session?.settings?.onboardingCompleted;
+    // Wait for session settings to be hydrated before checking
+    // onboardingCompleted is undefined until settings load from DB
+    if (session?.settings?.onboardingCompleted === undefined) return;
+    const alreadyCompleted = session.settings.onboardingCompleted === true;
     if (showOnboarding && !alreadyCompleted) {
       navigate("/onboarding");
     }

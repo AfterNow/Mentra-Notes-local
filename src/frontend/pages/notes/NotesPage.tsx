@@ -2,21 +2,28 @@
  * NotesPage - All notes view with filters
  *
  * Shows all notes across all days with filter pills:
- * All, Favorites, Manual, AI Generated
- * Empty state when no notes exist.
+ * All, Favourites, Manual, AI + show filter from drawer (Archived, Trash)
+ * Loading animation on filter switch, empty state with dot art.
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import { useMentraAuth } from "@mentra/react";
+import { AnimatePresence, motion } from "motion/react";
 import { format, isToday, isYesterday } from "date-fns";
 import { useSynced } from "../../hooks/useSynced";
 import type { SessionI, Note } from "../../../shared/types";
 import { NoteRow } from "./NoteRow";
 import { NotesFABMenu } from "./NotesFABMenu";
+import {
+  NotesFilterDrawer,
+  type NoteSortBy,
+  type NoteShowFilter,
+} from "../../components/shared/NotesFilterDrawer";
+import { LoadingState } from "../../components/shared/LoadingState";
+import { BottomDrawer } from "../../components/shared/BottomDrawer";
 
-
-type NoteFilter = "all" | "favorites" | "manual" | "ai";
+type NoteFilter = "all" | "manual" | "ai";
 
 /** Strip HTML tags and return first ~40 words */
 function stripHtmlAndTruncate(html: string | undefined, maxWords = 40): string {
@@ -40,6 +47,13 @@ export function NotesPage() {
   const { session } = useSynced<SessionI>(userId || "");
   const [, setLocation] = useLocation();
   const [activeFilter, setActiveFilter] = useState<NoteFilter>("all");
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [sortBy, setSortBy] = useState<NoteSortBy>("recent");
+  const [showFilter, setShowFilter] = useState<NoteShowFilter>("all");
+  const [filterLoading, setFilterLoading] = useState(false);
+  const filterLoadingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingFilterRef = useRef<{ sortBy: NoteSortBy; showFilter: NoteShowFilter } | null>(null);
+  const [showEmptyTrashConfirm, setShowEmptyTrashConfirm] = useState(false);
 
   const notes = session?.notes?.notes ?? [];
   const conversations = session?.conversation?.conversations ?? [];
@@ -51,7 +65,6 @@ export function NotesPage() {
     const map = new Map<string, string>();
     for (const conv of conversations) {
       if (conv.title && conv.date) {
-        // Store most recent conversation title per date
         if (!map.has(conv.date)) {
           map.set(conv.date, conv.title);
         }
@@ -60,33 +73,94 @@ export function NotesPage() {
     return map;
   }, [conversations]);
 
-  // Filter notes
+  // Filter notes — two-level: show filter + pill filter
   const filteredNotes = useMemo(() => {
-    switch (activeFilter) {
-      case "manual":
-        return notes.filter((n) => !n.isAIGenerated);
-      case "ai":
-        return notes.filter((n) => n.isAIGenerated);
-      // TODO: "favorites" filter — no favorite field on Note yet
-      case "favorites":
-        return notes;
-      default:
-        return notes;
+    let result = [...notes];
+
+    // Show filter (mutually exclusive states)
+    if (showFilter === "favourites") {
+      result = result.filter((n) => n.isFavourite);
+    } else if (showFilter === "archived") {
+      result = result.filter((n) => n.isArchived);
+    } else if (showFilter === "trash") {
+      result = result.filter((n) => n.isTrashed);
+    } else {
+      // "all" — hide archived and trashed
+      result = result.filter((n) => !n.isTrashed && !n.isArchived);
     }
-  }, [notes, activeFilter]);
+
+    // Pill filters (AI/Manual) — applied on top
+    if (activeFilter === "manual") {
+      result = result.filter((n) => !n.isAIGenerated);
+    } else if (activeFilter === "ai") {
+      result = result.filter((n) => n.isAIGenerated);
+    }
+
+    // Sort
+    if (sortBy === "oldest") {
+      result.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    } else {
+      result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    }
+
+    return result;
+  }, [notes, activeFilter, showFilter, sortBy]);
+
+  const trashedNoteCount = useMemo(() => {
+    return notes.filter((n) => n.isTrashed).length;
+  }, [notes]);
+
+  const handleFilterApply = useCallback(({ sortBy: newSortBy, showFilter: newShowFilter }: { sortBy: NoteSortBy; showFilter: NoteShowFilter }) => {
+    setIsFilterOpen(false);
+    pendingFilterRef.current = { sortBy: newSortBy, showFilter: newShowFilter };
+    setFilterLoading(true);
+    if (filterLoadingRef.current) clearTimeout(filterLoadingRef.current);
+    filterLoadingRef.current = setTimeout(() => {
+      const pending = pendingFilterRef.current;
+      if (pending) {
+        setSortBy(pending.sortBy);
+        setShowFilter(pending.showFilter);
+        pendingFilterRef.current = null;
+      }
+      setFilterLoading(false);
+    }, 3000);
+  }, []);
+
+  useEffect(() => {
+    return () => { if (filterLoadingRef.current) clearTimeout(filterLoadingRef.current); };
+  }, []);
 
   const handleSelectNote = (note: Note) => {
     setLocation(`/note/${note.id}`);
   };
 
-  const handleDeleteNote = async (note: Note) => {
-    if (!session?.notes?.deleteNote) return;
-    await session.notes.deleteNote(note.id);
+  const handleArchiveNote = async (note: Note) => {
+    if (!session?.notes) return;
+    if (note.isArchived) {
+      await session.notes.unarchiveNote(note.id);
+    } else {
+      await session.notes.archiveNote(note.id);
+    }
   };
 
-  const handleArchiveNote = async (note: Note) => {
-    if (!session?.file?.archiveFile) return;
-    await session.file.archiveFile(note.date);
+  const handleTrashNote = async (note: Note) => {
+    if (!session?.notes) return;
+    if (note.isTrashed) {
+      await session.notes.untrashNote(note.id);
+    } else {
+      await session.notes.trashNote(note.id);
+    }
+  };
+
+  const handlePermanentlyDeleteNote = async (note: Note) => {
+    if (!session?.notes?.permanentlyDeleteNote) return;
+    await session.notes.permanentlyDeleteNote(note.id);
+  };
+
+  const handleEmptyTrash = async () => {
+    setShowEmptyTrashConfirm(false);
+    if (!session?.notes?.emptyNoteTrash) return;
+    await session.notes.emptyNoteTrash();
   };
 
   const handleAddNote = async () => {
@@ -112,12 +186,10 @@ export function NotesPage() {
     return formatNoteDate(note);
   };
 
-  // Filter pill config
   const filters: { key: NoteFilter; label: string }[] = [
     { key: "all", label: "All" },
-    { key: "favorites", label: "Favorites" },
     { key: "manual", label: "Manual" },
-    { key: "ai", label: "AI Generated" },
+    { key: "ai", label: "AI" },
   ];
 
   // --- Empty state ---
@@ -127,7 +199,7 @@ export function NotesPage() {
         {/* Header */}
         <div className="flex flex-col pt-3 gap-2 px-6 shrink-0">
           <div className="flex items-center gap-2">
-            <div className={`text-[11px] tracking-widest uppercase leading-3.5 text-[#DC2626] font-red-hat font-bold`}>
+            <div className="text-[11px] tracking-widest uppercase leading-3.5 text-[#DC2626] font-red-hat font-bold">
               MENTRA NOTES
             </div>
             <div className={`flex items-center gap-1 h-full px-1 rounded ${isMicActive ? 'bg-[#FEF2F2]' : 'bg-[#F5F5F4]'}`}>
@@ -152,35 +224,14 @@ export function NotesPage() {
           </div>
           <div className="flex items-end justify-between">
             <div className="flex flex-col gap-0.5">
-              <div className={`text-[32px] leading-10 text-[#1C1917] font-red-hat font-extrabold`}>
+              <div className="text-[32px] leading-10 text-[#1C1917] font-red-hat font-extrabold">
                 Notes
               </div>
-              <div className={`text-[14px] leading-[18px] text-[#A8A29E] font-red-hat`}>
+              <div className="text-[14px] leading-[18px] text-[#A8A29E] font-red-hat">
                 0 notes
               </div>
             </div>
           </div>
-        </div>
-
-        {/* Filter pills */}
-        <div className="flex items-center py-4 gap-2 px-6 shrink-0 overflow-x-auto">
-          {filters.map((f) => (
-            <button
-              key={f.key}
-              onClick={() => setActiveFilter(f.key)}
-              className={`flex items-center rounded-[20px] py-[7px] px-4 shrink-0 ${
-                activeFilter === f.key ? "bg-[#1C1917]" : "bg-[#F5F5F4]"
-              }`}
-            >
-              <span
-                className={`text-[13px] leading-4 font-red-hat ${
-                  activeFilter === f.key ? "text-[#FAFAF9] font-semibold" : "text-[#78716C] font-medium"
-                }`}
-              >
-                {f.label}
-              </span>
-            </button>
-          ))}
         </div>
 
         {/* Empty center content */}
@@ -195,10 +246,10 @@ export function NotesPage() {
               </svg>
             </div>
             <div className="flex flex-col items-center gap-2">
-              <div className={`text-[20px] leading-6 text-[#1C1917] font-red-hat font-extrabold`}>
+              <div className="text-[20px] leading-6 text-[#1C1917] font-red-hat font-extrabold">
                 No notes yet
               </div>
-              <div className={`text-[14px] leading-5 text-center text-[#A8A29E] font-red-hat`}>
+              <div className="text-[14px] leading-5 text-center text-[#A8A29E] font-red-hat">
                 Your notes will show up here
               </div>
             </div>
@@ -206,10 +257,7 @@ export function NotesPage() {
 
           {/* Action cards */}
           <div className="flex flex-col w-full max-w-[329px] gap-2.5">
-            <button
-              onClick={handleAddNote}
-              className="flex items-center rounded-2xl gap-3.5 bg-[#F5F5F4] p-4 text-left"
-            >
+            <button onClick={handleAddNote} className="flex items-center rounded-2xl gap-3.5 bg-[#F5F5F4] p-4 text-left">
               <div className="flex items-center justify-center shrink-0 rounded-xl bg-[#FAFAF9] size-10">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1C1917" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
@@ -217,34 +265,22 @@ export function NotesPage() {
                 </svg>
               </div>
               <div className="flex flex-col grow shrink basis-0 gap-0.5">
-                <div className={`text-[14px] leading-[18px] text-[#1C1917] font-red-hat font-bold`}>
-                  Write a note
-                </div>
-                <div className={`text-[12px] leading-4 text-[#78716C] font-red-hat`}>
-                  Tap + to create a manual note
-                </div>
+                <div className="text-[14px] leading-[18px] text-[#1C1917] font-red-hat font-bold">Write a note</div>
+                <div className="text-[12px] leading-4 text-[#78716C] font-red-hat">Tap + to create a manual note</div>
               </div>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D6D3D1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="9 18 15 12 9 6" />
               </svg>
             </button>
-
-            <button
-              onClick={() => setLocation("/")}
-              className="flex items-center rounded-2xl gap-3.5 bg-[#FEE2E2] p-4 text-left"
-            >
+            <button onClick={() => setLocation("/")} className="flex items-center rounded-2xl gap-3.5 bg-[#FEE2E2] p-4 text-left">
               <div className="flex items-center justify-center shrink-0 rounded-xl bg-[#FAFAF9] size-10">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                 </svg>
               </div>
               <div className="flex flex-col grow shrink basis-0 gap-0.5">
-                <div className={`text-[14px] leading-[18px] text-[#1C1917] font-red-hat font-bold`}>
-                  Generate AI note
-                </div>
-                <div className={`text-[12px] leading-4 text-[#78716C] font-red-hat`}>
-                  From any conversation
-                </div>
+                <div className="text-[14px] leading-[18px] text-[#1C1917] font-red-hat font-bold">Generate AI note</div>
+                <div className="text-[12px] leading-4 text-[#78716C] font-red-hat">From any conversation</div>
               </div>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D6D3D1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="9 18 15 12 9 6" />
@@ -253,13 +289,7 @@ export function NotesPage() {
           </div>
         </div>
 
-        {/* FAB Menu */}
-        <NotesFABMenu
-          onAddNote={handleAddNote}
-          onAskAI={() => setLocation("/")}
-          onCreateFolder={() => setLocation("/collections")}
-        />
-
+        <NotesFABMenu onAddNote={handleAddNote} onAskAI={() => setLocation("/")} onCreateFolder={() => setLocation("/collections")} />
       </div>
     );
   }
@@ -270,7 +300,7 @@ export function NotesPage() {
       {/* Header */}
       <div className="flex flex-col pt-3 gap-2 px-6 shrink-0">
         <div className="flex items-center gap-2">
-          <div className={`text-[11px] tracking-widest uppercase leading-3.5 text-[#DC2626] font-red-hat font-bold`}>
+          <div className="text-[11px] tracking-widest uppercase leading-3.5 text-[#DC2626] font-red-hat font-bold">
             Mentra Notes
           </div>
           <div className={`flex items-center gap-1 h-full px-1 rounded ${isMicActive ? 'bg-[#FEF2F2]' : 'bg-[#F5F5F4]'}`}>
@@ -295,20 +325,23 @@ export function NotesPage() {
         </div>
         <div className="flex items-end justify-between">
           <div className="flex flex-col gap-0.5">
-            <div className={`text-[30px] tracking-[-0.03em] leading-[34px] text-[#1C1917] font-red-hat font-extrabold`}>
+            <div className="text-[30px] tracking-[-0.03em] leading-[34px] text-[#1C1917] font-red-hat font-extrabold">
               Notes
             </div>
-            <div className={`text-[14px] leading-[18px] text-[#A8A29E] font-red-hat`}>
+            <div className="text-[14px] leading-[18px] text-[#A8A29E] font-red-hat">
               {filteredNotes.length} {filteredNotes.length === 1 ? "note" : "notes"}
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {/* Filter icon */}
-            <div className="flex items-center justify-center w-[34px] h-[34px] rounded-[10px] bg-[#F5F5F4] shrink-0">
+            {/* Filter button */}
+            <button
+              onClick={() => setIsFilterOpen(true)}
+              className="flex items-center justify-center w-[34px] h-[34px] rounded-[10px] bg-[#F5F5F4] shrink-0"
+            >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                 <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" stroke="#78716C" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-            </div>
+            </button>
             {/* List/Grid toggle */}
             <div className="flex items-center rounded-[10px] py-[3px] px-[3px] bg-[#F5F5F4]">
               <div className="flex items-center justify-center w-[34px] h-[30px] rounded-lg bg-[#1C1917] shrink-0">
@@ -318,10 +351,7 @@ export function NotesPage() {
                   <line x1="4" y1="18" x2="20" y2="18" stroke="#FAFAF9" strokeWidth="2" strokeLinecap="round" />
                 </svg>
               </div>
-              <button
-                onClick={() => setLocation("/collections")}
-                className="flex items-center justify-center w-[34px] h-[30px] rounded-lg shrink-0"
-              >
+              <button onClick={() => setLocation("/collections")} className="flex items-center justify-center w-[34px] h-[30px] rounded-lg shrink-0">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                   <rect x="3" y="3" width="7" height="7" rx="1" stroke="#78716C" strokeWidth="2" />
                   <rect x="14" y="3" width="7" height="7" rx="1" stroke="#78716C" strokeWidth="2" />
@@ -335,55 +365,179 @@ export function NotesPage() {
       </div>
 
       {/* Filter pills */}
-      <div className="flex items-center pt-4 gap-2 px-6 shrink-0">
-        {filters.map((f) => (
-          <button
-            key={f.key}
-            onClick={() => setActiveFilter(f.key)}
-            className={`flex items-center rounded-[20px] py-[7px] px-4 shrink-0 ${
-              activeFilter === f.key ? "bg-[#1C1917]" : "bg-[#F5F5F4]"
-            }`}
-          >
-            <span
-              className={`text-[13px] leading-4 font-red-hat ${
-                activeFilter === f.key ? "text-[#FAFAF9] font-semibold" : "text-[#78716C] font-medium"
+      <div className="flex items-center pt-4 gap-2 px-6 shrink-0 overflow-x-auto">
+        {filters.map((f) => {
+          const isActive = showFilter === "all" && activeFilter === f.key;
+          return (
+            <button
+              key={f.key}
+              onClick={() => {
+                setShowFilter("all");
+                setActiveFilter(f.key);
+              }}
+              className={`flex items-center rounded-[20px] py-[7px] px-4 shrink-0 ${
+                isActive ? "bg-[#1C1917]" : "bg-[#F5F5F4]"
               }`}
             >
-              {f.label}
-            </span>
-          </button>
-        ))}
-      </div>
-
-      {/* Notes list */}
-      <div className="flex flex-col flex-1 overflow-y-auto pt-4 px-6 pb-32">
-        {filteredNotes.map((note, i) => {
-          const fromLabel = getFromLabel(note);
-          const isLast = i === filteredNotes.length - 1;
-
-          return (
-            <NoteRow
-              key={note.id}
-              note={note}
-              fromLabel={fromLabel}
-              formatNoteDate={formatNoteDate}
-              stripHtmlAndTruncate={stripHtmlAndTruncate}
-              onSelect={handleSelectNote}
-              onArchive={handleArchiveNote}
-              onDelete={handleDeleteNote}
-              isLast={isLast}
-            />
+              <span className={`text-[13px] leading-4 font-red-hat ${isActive ? "text-[#FAFAF9] font-semibold" : "text-[#78716C] font-medium"}`}>
+                {f.label}
+              </span>
+            </button>
           );
         })}
+        {/* Show filter tag from drawer (archived/trash) */}
+        {(showFilter === "archived" || showFilter === "trash") && (
+          <button
+            onClick={() => setShowFilter("all")}
+            className="flex items-center rounded-[20px] py-[7px] px-4 shrink-0 bg-[#1C1917]"
+          >
+            <span className="text-[13px] leading-4 text-[#FAFAF9] font-red-hat font-semibold">
+              {showFilter === "archived" ? "Archived" : "Trash"}
+            </span>
+          </button>
+        )}
+      </div>
+
+      {/* Content */}
+      <div className="flex flex-col flex-1 overflow-y-auto pt-4 px-6 pb-32">
+        {filterLoading ? (
+          <div className="flex flex-col items-center justify-center flex-1">
+            <LoadingState size={100} cycleMessages />
+          </div>
+        ) : filteredNotes.length === 0 ? (
+          <div className="flex flex-col items-center justify-center flex-1 gap-5">
+            <svg width="140" height="130" viewBox="0 0 140 130" fill="none">
+              <circle cx="30" cy="90" r="3" fill="#D94F3B66" />
+              <circle cx="38" cy="90" r="3" fill="#D94F3B66" />
+              <circle cx="46" cy="90" r="3" fill="#D94F3B66" />
+              <circle cx="54" cy="90" r="3" fill="#D94F3B66" />
+              <circle cx="62" cy="90" r="3" fill="#D94F3B66" />
+              <circle cx="70" cy="90" r="3" fill="#D94F3B66" />
+              <circle cx="78" cy="90" r="3" fill="#D94F3B66" />
+              <circle cx="86" cy="90" r="3" fill="#D94F3B66" />
+              <circle cx="94" cy="90" r="3" fill="#D94F3B66" />
+              <circle cx="102" cy="90" r="3" fill="#D94F3B66" />
+              <circle cx="110" cy="90" r="3" fill="#D94F3B66" />
+              <circle cx="30" cy="58" r="3" fill="#D94F3B59" />
+              <circle cx="38" cy="58" r="3" fill="#D94F3B59" />
+              <circle cx="46" cy="58" r="3" fill="#D94F3B59" />
+              <circle cx="54" cy="58" r="3" fill="#D94F3B59" />
+              <circle cx="62" cy="58" r="3" fill="#D94F3B59" />
+              <circle cx="70" cy="58" r="3" fill="#D94F3B59" />
+              <circle cx="78" cy="58" r="3" fill="#D94F3B59" />
+              <circle cx="86" cy="58" r="3" fill="#D94F3B59" />
+              <circle cx="94" cy="58" r="3" fill="#D94F3B59" />
+              <circle cx="102" cy="58" r="3" fill="#D94F3B59" />
+              <circle cx="110" cy="58" r="3" fill="#D94F3B59" />
+              <circle cx="30" cy="66" r="3" fill="#D94F3B59" />
+              <circle cx="30" cy="74" r="3" fill="#D94F3B59" />
+              <circle cx="30" cy="82" r="3" fill="#D94F3B59" />
+              <circle cx="110" cy="66" r="3" fill="#D94F3B59" />
+              <circle cx="110" cy="74" r="3" fill="#D94F3B59" />
+              <circle cx="110" cy="82" r="3" fill="#D94F3B59" />
+              <circle cx="70" cy="66" r="2.5" fill="#D94F3B59" />
+              <circle cx="70" cy="74" r="2" fill="#D94F3B59" />
+              <circle cx="70" cy="82" r="2.5" fill="#D94F3B59" />
+            </svg>
+            <div className="tracking-[0.01em] text-[#D94F3B8C] font-red-hat font-medium text-[18px] leading-[22px]">
+              Nothing found
+            </div>
+            <div className="tracking-[0.02em] text-[#968C82B3] font-red-hat text-[13px] leading-4">
+              {showFilter === "trash"
+                ? "Your trash is empty"
+                : showFilter === "archived"
+                  ? "No archived notes"
+                  : showFilter === "favourites"
+                    ? "No favourite notes yet"
+                    : "Try adjusting your filters"}
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Trash header */}
+            {showFilter === "trash" && trashedNoteCount > 0 && (
+              <div className="flex items-center justify-between pb-3">
+                <span className="text-[13px] leading-4 text-[#A8A29E] font-red-hat font-medium">
+                  {trashedNoteCount} {trashedNoteCount === 1 ? "note" : "notes"} in trash
+                </span>
+                <button
+                  onClick={() => setShowEmptyTrashConfirm(true)}
+                  className="text-[13px] leading-4 text-[#DC2626] font-red-hat font-semibold"
+                >
+                  Empty Trash
+                </button>
+              </div>
+            )}
+            <AnimatePresence initial={false}>
+              {filteredNotes.map((note, i) => {
+                const fromLabel = getFromLabel(note);
+                const isLast = i === filteredNotes.length - 1;
+                const isTrashed = note.isTrashed;
+
+                return (
+                  <motion.div
+                    key={note.id}
+                    layout
+                    initial={false}
+                    exit={{ opacity: 0, height: 0, marginTop: 0, marginBottom: 0 }}
+                    transition={{ duration: 0.25, ease: "easeOut" }}
+                    style={{ overflow: "hidden" }}
+                  >
+                    <NoteRow
+                      note={note}
+                      fromLabel={fromLabel}
+                      formatNoteDate={formatNoteDate}
+                      stripHtmlAndTruncate={stripHtmlAndTruncate}
+                      onSelect={handleSelectNote}
+                      onArchive={isTrashed ? undefined : handleArchiveNote}
+                      onDelete={isTrashed ? handlePermanentlyDeleteNote : handleTrashNote}
+                      isLast={isLast}
+                    />
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+          </>
+        )}
       </div>
 
       {/* FAB Menu */}
-      <NotesFABMenu
-        onAddNote={handleAddNote}
-        onAskAI={() => setLocation("/")}
-        onCreateFolder={() => setLocation("/collections")}
+      <NotesFABMenu onAddNote={handleAddNote} onAskAI={() => setLocation("/")} onCreateFolder={() => setLocation("/collections")} />
+
+      {/* Filter Drawer */}
+      <NotesFilterDrawer
+        isOpen={isFilterOpen}
+        onClose={() => setIsFilterOpen(false)}
+        sortBy={sortBy}
+        showFilter={showFilter}
+        onApply={handleFilterApply}
       />
 
+      {/* Empty Trash Confirmation */}
+      <BottomDrawer isOpen={showEmptyTrashConfirm} onClose={() => setShowEmptyTrashConfirm(false)}>
+        <div className="flex flex-col items-center gap-3">
+          <div className="text-[18px] leading-[22px] text-[#1C1917] font-red-hat font-bold text-center">
+            Empty Trash?
+          </div>
+          <div className="text-[14px] leading-5 text-[#A8A29E] font-red-hat text-center">
+            Your notes will be permanently deleted. This cannot be undone.
+          </div>
+          <div className="flex gap-3 w-full mt-3">
+            <button
+              onClick={() => setShowEmptyTrashConfirm(false)}
+              className="flex-1 py-3 rounded-xl text-[15px] leading-5 font-red-hat font-medium bg-[#F5F5F4] text-[#78716C]"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleEmptyTrash}
+              className="flex-1 py-3 rounded-xl text-[15px] leading-5 font-red-hat font-bold bg-[#DC2626] text-white"
+            >
+              Delete All
+            </button>
+          </div>
+        </div>
+      </BottomDrawer>
     </div>
   );
 }

@@ -363,13 +363,18 @@ export class CloudflareR2Manager extends SyncedManager {
     }
 
     console.log(`[R2Manager] fetchTranscript(${date}) for user ${userId}`);
-    const result = await fetchTranscriptFromR2({ userId, date });
+    try {
+      const result = await fetchTranscriptFromR2({ userId, date });
 
-    if (result.success && result.data) {
-      console.log(`[R2Manager] ✓ Found R2 transcript for ${date}: ${result.data.segments?.length || 0} segments`);
-      return result.data;
-    } else {
-      console.log(`[R2Manager] ✗ No R2 transcript found for ${date}`, result.error || '');
+      if (result.success && result.data) {
+        console.log(`[R2Manager] ✓ Found R2 transcript for ${date}: ${result.data.segments?.length || 0} segments`);
+        return result.data;
+      } else {
+        console.log(`[R2Manager] ✗ No R2 transcript found for ${date}`);
+        return null;
+      }
+    } catch {
+      console.log(`[R2Manager] ✗ R2 fetch failed for ${date}`);
       return null;
     }
   }

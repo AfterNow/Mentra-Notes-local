@@ -52,21 +52,25 @@ export function FolderPage() {
   const folder = folders.find((f) => f.id === folderId);
 
   const folderNotes = useMemo(() => {
-    return notes.filter((n) => n.folderId === folderId);
+    return notes.filter((n) => n.folderId === folderId && !n.isTrashed);
   }, [notes, folderId]);
 
   const handleSelectNote = (note: Note) => {
     setLocation(`/note/${note.id}`);
   };
 
-  const handleDeleteNote = async (note: Note) => {
-    if (!session?.notes?.deleteNote) return;
-    await session.notes.deleteNote(note.id);
+  const handleTrashNote = async (note: Note) => {
+    if (!session?.notes?.trashNote) return;
+    await session.notes.trashNote(note.id);
   };
 
   const handleArchiveNote = async (note: Note) => {
-    if (!session?.file?.archiveFile) return;
-    await session.file.archiveFile(note.date);
+    if (!session?.notes) return;
+    if (note.isArchived) {
+      await session.notes.unarchiveNote(note.id);
+    } else {
+      await session.notes.archiveNote(note.id);
+    }
   };
 
   const formatNoteDate = (note: Note): string => {
@@ -201,7 +205,7 @@ export function FolderPage() {
                 stripHtmlAndTruncate={stripHtmlAndTruncate}
                 onSelect={handleSelectNote}
                 onArchive={handleArchiveNote}
-                onDelete={handleDeleteNote}
+                onDelete={handleTrashNote}
                 isLast={isLast}
               />
             );
