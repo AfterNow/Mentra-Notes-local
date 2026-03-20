@@ -68,7 +68,12 @@ export class FoldersManager extends SyncedManager {
     const userId = this._session?.userId;
     if (!userId) throw new Error("No user session");
 
-    const dbFolder = await createFolder(userId, { name, color });
+    const duplicate = this.folders.some(
+      (f) => f.name.toLowerCase() === name.trim().toLowerCase()
+    );
+    if (duplicate) throw new Error(`A folder named "${name.trim()}" already exists`);
+
+    const dbFolder = await createFolder(userId, { name: name.trim(), color });
     const folder: FolderData = {
       id: dbFolder._id?.toString() || dbFolder.id,
       name: dbFolder.name,

@@ -14,6 +14,7 @@ import {
   incrementNoteCount,
   updateFileTranscript,
   getAvailableDates,
+  getTranscriptSummaries,
   deleteFile as deleteFileFromDb,
   deleteDailyTranscript,
   deleteNotesByDate,
@@ -214,6 +215,24 @@ export class FileManager extends SyncedManager {
           const idx = list.findIndex((f) => f.date === today);
           if (idx >= 0) {
             list[idx].transcriptSegmentCount = transcriptManager.segments.length;
+          }
+        });
+      }
+
+      // Backfill segment counts for historical files that show 0 but have transcripts in MongoDB
+      const zeroCountDates = files.filter((f) => f.transcriptSegmentCount === 0 && f.hasTranscript).map((f) => f.date);
+      if (zeroCountDates.length > 0) {
+        const summaries = await getTranscriptSummaries(userId);
+        const summaryMap = new Map(summaries.map((s) => [s.date, s.segmentCount]));
+        this.files.mutate((list) => {
+          for (const date of zeroCountDates) {
+            const count = summaryMap.get(date);
+            if (count && count > 0) {
+              const idx = list.findIndex((f) => f.date === date);
+              if (idx >= 0) {
+                list[idx].transcriptSegmentCount = count;
+              }
+            }
           }
         });
       }

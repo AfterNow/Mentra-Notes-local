@@ -153,9 +153,12 @@ export function ConversationList({
               return (
                 <motion.div
                   key={conv.id}
+                  layout
                   initial={isNew ? { opacity: 0, y: 16 } : false}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3, ease: "easeOut" }}
+                  animate={{ opacity: 1, y: 0, height: "auto" }}
+                  exit={{ opacity: 0, height: 0, marginTop: 0, marginBottom: 0 }}
+                  transition={{ duration: 0.25, ease: "easeOut" }}
+                  style={{ overflow: "hidden" }}
                 >
                   <ConversationRow
                     conversation={conv}

@@ -382,12 +382,12 @@ export function NotePage() {
           {/* Favorite star */}
           <button className="p-1">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-              <path
+              {/* <path
                 d="M12 2l2.09 6.26L20.18 9l-4.91 3.74L17.18 19 12 15.27 6.82 19l1.91-6.26L3.82 9l6.09-.74z"
                 stroke="#1C1917"
                 strokeWidth="1.75"
                 fill="none"
-              />
+              /> */}
             </svg>
           </button>
           {/* More menu */}

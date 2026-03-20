@@ -16,6 +16,7 @@ import { format } from "date-fns";
 import { useSynced } from "../../hooks/useSynced";
 import { WaveIndicator } from "../../components/shared/WaveIndicator";
 import type { SessionI, Conversation, ConversationChunk, ConversationSegment, TranscriptSegment } from "../../../shared/types";
+import { DropdownMenu, type DropdownMenuOption } from "../../components/shared/DropdownMenu";
 
 /** Stable speakerId string → sequential color index (first seen = 0, second = 1, …) */
 function buildSpeakerMap(segments: (TranscriptSegment | ConversationSegment)[]): Map<string, number> {
@@ -158,13 +159,76 @@ export function ConversationDetailPage() {
               <line x1="12" y1="2" x2="12" y2="15" stroke="#52525B" strokeWidth="1.75" strokeLinecap="round" />
             </svg>
           </button>
-          <button className="p-1">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="6" r="1.5" fill="#52525B" />
-              <circle cx="12" cy="12" r="1.5" fill="#52525B" />
-              <circle cx="12" cy="18" r="1.5" fill="#52525B" />
-            </svg>
-          </button>
+          <DropdownMenu
+            options={(() => {
+              const isFav = conversation.isFavourite ?? false;
+              const isArchived = conversation.isArchived ?? false;
+              const isTrashed = conversation.isTrashed ?? false;
+              const convManager = session?.conversation;
+
+              const items: DropdownMenuOption[] = [
+                {
+                  id: "favourite",
+                  label: isFav ? "Unfavourite" : "Favourite",
+                  icon: (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill={isFav ? "#DC2626" : "none"} stroke={isFav ? "#DC2626" : "#78716C"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                    </svg>
+                  ),
+                  onClick: async () => {
+                    if (!convManager) return;
+                    if (isFav) {
+                      await convManager.unfavouriteConversation(conversation.id);
+                    } else {
+                      await convManager.favouriteConversation(conversation.id);
+                    }
+                  },
+                },
+                {
+                  id: "archive",
+                  label: isArchived ? "Unarchive" : "Archive",
+                  icon: (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#78716C" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 8v13H3V8" />
+                      <rect x="1" y="3" width="22" height="5" rx="1" />
+                      <line x1="10" y1="12" x2="14" y2="12" />
+                    </svg>
+                  ),
+                  onClick: async () => {
+                    if (!convManager) return;
+                    if (isArchived) {
+                      await convManager.unarchiveConversation(conversation.id);
+                    } else {
+                      await convManager.archiveConversation(conversation.id);
+                    }
+                  },
+                },
+                { type: "divider" },
+                {
+                  id: "trash",
+                  label: isTrashed ? "Untrash" : "Trash",
+                  danger: !isTrashed,
+                  icon: (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={isTrashed ? "#78716C" : "#DC2626"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M3 6h18" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+                      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    </svg>
+                  ),
+                  onClick: async () => {
+                    if (!convManager) return;
+                    if (isTrashed) {
+                      await convManager.untrashConversation(conversation.id);
+                    } else {
+                      await convManager.trashConversation(conversation.id);
+                      setLocation("/");
+                    }
+                  },
+                },
+              ];
+              return items;
+            })()}
+          />
         </div>
       </div>
 
@@ -177,9 +241,9 @@ export function ConversationDetailPage() {
               Summary
             </div>
             <div className="flex items-center rounded-sm py-0.5 px-2 gap-1 bg-[#FEE2E2]">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none">
+              {/* <svg width="10" height="10" viewBox="0 0 24 24" fill="none">
                 <path d="M12 2l2.09 6.26L20.18 9l-4.91 3.74L17.18 19 12 15.27 6.82 19l1.91-6.26L3.82 9l6.09-.74z" fill="#DC2626" />
-              </svg>
+              </svg> */}
               <div className={`text-[10px] leading-3.5 text-[#DC2626] font-red-hat font-bold`}>
                 AI
               </div>

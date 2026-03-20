@@ -304,7 +304,7 @@ This note covers the discussion from ${timeRange}.
                             )}
                         </div>
                         <span className="text-base font-medium text-red-600 dark:text-red-400">
-                             {folder.isTrashed ? 'Restore from Trash' : 'Move to Trash'}
+                             {folder.isTrashed ? 'Restore from Trash' : 'Trash'}
                         </span>
                     </button>
                 </div>

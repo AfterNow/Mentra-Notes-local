@@ -224,6 +224,9 @@ export class ConversationManager extends SyncedManager {
         aiSummary: conv.aiSummary || "",
         generatingSummary: conv.generatingSummary || false,
         noteId: conv.noteId || null,
+        isFavourite: false,
+        isArchived: false,
+        isTrashed: false,
         chunks: [],
         segments: [],
       };
@@ -519,6 +522,80 @@ ${transcript}
     });
   }
 
+  @rpc
+  async favouriteConversation(conversationId: string): Promise<void> {
+    await updateConversation(conversationId, { isFavourite: true, isArchived: false, isTrashed: false });
+    this.conversations.mutate((list) => {
+      const idx = list.findIndex((c) => c.id === conversationId);
+      if (idx >= 0) { list[idx].isFavourite = true; list[idx].isArchived = false; list[idx].isTrashed = false; }
+    });
+  }
+
+  @rpc
+  async unfavouriteConversation(conversationId: string): Promise<void> {
+    await updateConversation(conversationId, { isFavourite: false });
+    this.conversations.mutate((list) => {
+      const idx = list.findIndex((c) => c.id === conversationId);
+      if (idx >= 0) list[idx].isFavourite = false;
+    });
+  }
+
+  @rpc
+  async archiveConversation(conversationId: string): Promise<void> {
+    await updateConversation(conversationId, { isArchived: true, isFavourite: false, isTrashed: false });
+    this.conversations.mutate((list) => {
+      const idx = list.findIndex((c) => c.id === conversationId);
+      if (idx >= 0) { list[idx].isArchived = true; list[idx].isFavourite = false; list[idx].isTrashed = false; }
+    });
+  }
+
+  @rpc
+  async unarchiveConversation(conversationId: string): Promise<void> {
+    await updateConversation(conversationId, { isArchived: false });
+    this.conversations.mutate((list) => {
+      const idx = list.findIndex((c) => c.id === conversationId);
+      if (idx >= 0) list[idx].isArchived = false;
+    });
+  }
+
+  @rpc
+  async trashConversation(conversationId: string): Promise<void> {
+    await updateConversation(conversationId, { isTrashed: true, isFavourite: false, isArchived: false });
+    this.conversations.mutate((list) => {
+      const idx = list.findIndex((c) => c.id === conversationId);
+      if (idx >= 0) { list[idx].isTrashed = true; list[idx].isFavourite = false; list[idx].isArchived = false; }
+    });
+  }
+
+  @rpc
+  async untrashConversation(conversationId: string): Promise<void> {
+    await updateConversation(conversationId, { isTrashed: false });
+    this.conversations.mutate((list) => {
+      const idx = list.findIndex((c) => c.id === conversationId);
+      if (idx >= 0) list[idx].isTrashed = false;
+    });
+  }
+
+  @rpc
+  async emptyTrash(): Promise<number> {
+    const trashed = (this.conversations as unknown as Conversation[])
+      .filter((c) => c.isTrashed);
+
+    console.log(`[ConvManager] Emptying trash: ${trashed.length} conversations`);
+
+    for (const conv of trashed) {
+      console.log(`[ConvManager] Deleting trashed conversation: ${conv.id} — "${conv.title}" (${conv.date})`);
+      await deleteConversation(conv.id);
+    }
+
+    this.conversations.set(
+      (this.conversations as unknown as Conversation[]).filter((c) => !c.isTrashed),
+    );
+
+    console.log(`[ConvManager] Trash emptied: ${trashed.length} conversations permanently deleted`);
+    return trashed.length;
+  }
+
   /**
    * Clear noteId from any conversation that references the given note.
    * Called when a note is deleted so the "Generate Note" button reappears.
@@ -566,6 +643,9 @@ ${transcript}
       aiSummary: conv.aiSummary || "",
       generatingSummary: conv.generatingSummary || false,
       noteId: conv.noteId || null,
+      isFavourite: conv.isFavourite ?? false,
+      isArchived: conv.isArchived ?? false,
+      isTrashed: conv.isTrashed ?? false,
       chunks,
       segments,
     };

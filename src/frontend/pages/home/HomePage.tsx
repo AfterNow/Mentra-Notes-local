@@ -10,18 +10,19 @@
  * - Keeps all existing backend logic (filters, trash, archive, calendar)
  */
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useLocation, useSearch } from "wouter";
 import { useMentraAuth } from "@mentra/react";
 import { ChevronLeft } from "lucide-react";
 import { useSynced } from "../../hooks/useSynced";
-import type { SessionI, FileFilter, Conversation } from "../../../shared/types";
+import type { SessionI, Conversation } from "../../../shared/types";
 import type { DailyFolder } from "./components/FolderList";
 import {
-  FilterDrawer,
-  type FilterType,
-  type ViewType,
-} from "../../components/shared/FilterDrawer";
+  ConversationFilterDrawer,
+  type SortBy,
+  type DateRange,
+  type ShowFilter,
+} from "../../components/shared/ConversationFilterDrawer";
 import { CalendarView } from "./components/CalendarView";
 import { GlobalAIChat } from "./components/GlobalAIChat";
 import { ConversationList } from "./components/ConversationList";
@@ -29,6 +30,7 @@ import { FABMenu } from "./components/FABMenu";
 import { TranscriptList } from "./components/TranscriptList";
 import { Drawer } from "vaul";
 import { HomePageSkeleton } from "../../components/shared/SkeletonLoader";
+import { LoadingState } from "../../components/shared/LoadingState";
 
 export function HomePage() {
   const { userId } = useMentraAuth();
@@ -43,6 +45,13 @@ export function HomePage() {
   const [showGlobalChat, setShowGlobalChat] = useState(false);
   const [showEmptyTrashConfirm, setShowEmptyTrashConfirm] = useState(false);
   const [timeFilter, setTimeFilter] = useState<"all" | "today">("all");
+  const [convSortBy, setConvSortBy] = useState<SortBy>("recent");
+  const [convDateRange, setConvDateRange] = useState<DateRange>("all");
+  const [convShowFilter, setConvShowFilter] = useState<ShowFilter>("all");
+  const [convCustomStart, setConvCustomStart] = useState<string | undefined>();
+  const [convCustomEnd, setConvCustomEnd] = useState<string | undefined>();
+  const [filterLoading, setFilterLoading] = useState(false);
+  const filterLoadingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialTab =
     new URLSearchParams(search).get("tab") === "transcripts"
       ? "transcripts"
@@ -77,15 +86,7 @@ export function HomePage() {
   const isConversationsHydrated = session?.conversation?.isHydrated ?? false;
   const availableDates = session?.transcript?.availableDates ?? [];
 
-  // Backend filter state
-  const backendFilter = session?.file?.activeFilter ?? "all";
-  const activeView: ViewType = isAllNotesView
-    ? "all_notes"
-    : backendFilter === "favourites"
-      ? "favorites"
-      : "folders";
-  const activeFilter: FilterType =
-    backendFilter === "favourites" ? "all" : (backendFilter as FilterType);
+  // Backend filter state (used by filterCounts)
 
   // Transform FileData to DailyFolder format (kept for calendar view)
   const folders = useMemo((): DailyFolder[] => {
@@ -117,11 +118,55 @@ export function HomePage() {
   }, []);
 
   const filteredConversations = useMemo(() => {
+    let result = [...conversations];
+
+    // Time filter (today tab)
     if (timeFilter === "today") {
-      return conversations.filter((c) => c.date === todayStr);
+      result = result.filter((c) => c.date === todayStr);
     }
-    return conversations;
-  }, [conversations, timeFilter, todayStr]);
+
+    // Date range filter
+    if (convDateRange === "custom" && convCustomStart && convCustomEnd) {
+      const start = new Date(convCustomStart + "T00:00:00").getTime();
+      const end = new Date(convCustomEnd + "T23:59:59").getTime();
+      result = result.filter((c) => {
+        const t = new Date(c.startTime).getTime();
+        return t >= start && t <= end;
+      });
+    } else if (convDateRange !== "all") {
+      const now = new Date();
+      let cutoff: Date;
+      if (convDateRange === "today") {
+        cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      } else if (convDateRange === "week") {
+        cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+      } else {
+        cutoff = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+      }
+      result = result.filter((c) => new Date(c.startTime).getTime() >= cutoff.getTime());
+    }
+
+    // Show filter
+    if (convShowFilter === "favourites") {
+      result = result.filter((c) => c.isFavourite);
+    } else if (convShowFilter === "archived") {
+      result = result.filter((c) => c.isArchived);
+    } else if (convShowFilter === "trash") {
+      result = result.filter((c) => c.isTrashed);
+    } else {
+      // "all" — hide archived and trashed
+      result = result.filter((c) => !c.isTrashed && !c.isArchived);
+    }
+
+    // Sort
+    if (convSortBy === "oldest") {
+      result.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+    } else {
+      result.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+    }
+
+    return result;
+  }, [conversations, timeFilter, todayStr, convDateRange, convShowFilter, convSortBy, convCustomStart, convCustomEnd]);
 
   // Count today's conversations for subtitle
   const todayConversationCount = useMemo(() => {
@@ -147,28 +192,6 @@ export function HomePage() {
   );
 
   // --- Handlers (all existing logic preserved) ---
-
-  const handleFilterChange = async (filter: FilterType) => {
-    setIsAllNotesView(false);
-    const fileFilter: FileFilter =
-      filter === "archived" ? "archived" : filter === "trash" ? "trash" : "all";
-    if (session?.file) {
-      await session.file.setFilter(fileFilter);
-    }
-  };
-
-  const handleViewChange = async (view: ViewType) => {
-    if (view === "all_notes") {
-      setIsAllNotesView(true);
-    } else if (view === "favorites") {
-      setIsAllNotesView(false);
-      if (session?.file) {
-        await session.file.setFilter("favourites");
-      }
-    } else {
-      setIsAllNotesView(false);
-    }
-  };
 
   const handleSelectConversation = useCallback((conversation: Conversation) => {
     setLocation(`/conversation/${conversation.id}`);
@@ -207,28 +230,76 @@ export function HomePage() {
   };
 
   const handleEmptyTrashConfirm = async () => {
-    if (!session?.file) return;
     setShowEmptyTrashConfirm(false);
     try {
-      const result = await session.file.emptyTrash();
-      console.log(`[HomePage] Empty trash result:`, result);
-      if (result.errors.length > 0) {
-        console.error(`[HomePage] Errors during empty trash:`, result.errors);
+      // Empty conversation trash
+      if (session?.conversation?.emptyTrash) {
+        const count = await session.conversation.emptyTrash();
+        console.log(`[HomePage] Deleted ${count} trashed conversations`);
+      }
+      // Empty file trash
+      if (session?.file?.emptyTrash) {
+        const result = await session.file.emptyTrash();
+        console.log(`[HomePage] Empty file trash result:`, result);
       }
     } catch (error) {
       console.error(`[HomePage] Failed to empty trash:`, error);
     }
   };
 
+  const trashedConversationCount = useMemo(() => {
+    return conversations.filter((c) => c.isTrashed).length;
+  }, [conversations]);
+
+  const pendingFilterRef = useRef<{ sortBy: SortBy; dateRange: DateRange; showFilter: ShowFilter; customStart?: string; customEnd?: string } | null>(null);
+
+  const handleFilterApply = useCallback(({ sortBy, dateRange, showFilter, customStart, customEnd }: { sortBy: SortBy; dateRange: DateRange; showFilter: ShowFilter; customStart?: string; customEnd?: string }) => {
+    setIsFilterOpen(false);
+
+    // Store pending filter, show spinner first
+    pendingFilterRef.current = { sortBy, dateRange, showFilter, customStart, customEnd };
+    setFilterLoading(true);
+
+    if (filterLoadingRef.current) clearTimeout(filterLoadingRef.current);
+    filterLoadingRef.current = setTimeout(() => {
+      // Apply the actual filter changes after spinner
+      const pending = pendingFilterRef.current;
+      if (pending) {
+        setConvSortBy(pending.sortBy);
+        setConvDateRange(pending.dateRange);
+        setConvShowFilter(pending.showFilter);
+        setConvCustomStart(pending.customStart);
+        setConvCustomEnd(pending.customEnd);
+        pendingFilterRef.current = null;
+      }
+      setFilterLoading(false);
+    }, 1000);
+  }, []);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (filterLoadingRef.current) clearTimeout(filterLoadingRef.current);
+    };
+  }, []);
+
   const handleArchiveConversation = useCallback(async (conversation: Conversation) => {
-    if (session?.file) {
-      await session.file.archiveFile(conversation.date);
+    if (session?.conversation) {
+      if (conversation.isArchived) {
+        await session.conversation.unarchiveConversation(conversation.id);
+      } else {
+        await session.conversation.archiveConversation(conversation.id);
+      }
     }
-  }, [session?.file]);
+  }, [session?.conversation]);
 
   const handleDeleteConversation = useCallback(async (conversation: Conversation) => {
     if (session?.conversation) {
-      await session.conversation.deleteConversation(conversation.id);
+      if (conversation.isTrashed) {
+        await session.conversation.deleteConversation(conversation.id);
+      } else {
+        await session.conversation.trashConversation(conversation.id);
+      }
     }
   }, [session?.conversation]);
 
@@ -269,15 +340,37 @@ export function HomePage() {
               )}
             </div>
           </div>
-          <div
-            className={`text-[30px] tracking-[-0.03em] leading-[34px] text-[#1C1917] font-red-hat font-extrabold`}
-          >
-            Conversations
-          </div>
-          <div
-            className={`text-[14px] leading-[18px] text-[#A8A29E] font-red-hat`}
-          >
-            No conversations yet
+          <div className="flex items-end justify-between">
+            <div className="flex flex-col gap-0.5">
+              <div className="text-[30px] tracking-[-0.03em] leading-[34px] text-[#1C1917] font-red-hat font-extrabold">
+                Conversations
+              </div>
+              <div className="text-[14px] leading-[18px] text-[#A8A29E] font-red-hat">
+                No conversations yet
+              </div>
+            </div>
+            {/* Conversations / Transcripts toggle */}
+            <div className="flex items-center rounded-[10px] py-[3px] px-[3px] bg-[#F5F5F4]">
+              <button
+                onClick={() => setActiveTimeFilter("conversations")}
+                className={`flex items-center justify-center w-[34px] h-[30px] rounded-lg shrink-0 ${renderedFilter === "conversations" ? "bg-[#1C1917]" : ""}`}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={renderedFilter === "conversations" ? "#FAFAF9" : "#78716C"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z" />
+                </svg>
+              </button>
+              <button
+                onClick={() => setActiveTimeFilter("transcripts")}
+                className={`flex items-center justify-center w-[34px] h-[30px] rounded-lg shrink-0 ${renderedFilter === "transcripts" ? "bg-[#1C1917]" : ""}`}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={renderedFilter === "transcripts" ? "#FAFAF9" : "#78716C"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 14h6" />
+                  <path d="M4 2h10" />
+                  <rect x="4" y="18" width="16" height="4" rx="1" />
+                  <rect x="4" y="6" width="16" height="4" rx="1" />
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -343,14 +436,15 @@ export function HomePage() {
         />
 
         {/* Filter Drawer (still needed for filter-based empty states) */}
-        <FilterDrawer
+        <ConversationFilterDrawer
           isOpen={isFilterOpen}
           onClose={() => setIsFilterOpen(false)}
-          activeFilter={activeFilter}
-          activeView={activeView}
-          onFilterChange={handleFilterChange}
-          onViewChange={handleViewChange}
-          counts={filterCounts}
+          sortBy={convSortBy}
+          dateRange={convDateRange}
+          showFilter={convShowFilter}
+          customStart={convCustomStart}
+          customEnd={convCustomEnd}
+          onApply={handleFilterApply}
         />
       </div>
     );
@@ -390,6 +484,7 @@ export function HomePage() {
   // --- Populated state (conversations list) ---
   return (
     <div className="flex h-full flex-col bg-[#FAFAF9] relative overflow-hidden">
+      {/* Filter loading overlay is rendered inline below */}
       {/* Header */}
       <div className="flex flex-col pt-3 gap-3 px-6 shrink-0" style={{ opacity: tabOpacity, transition: "opacity 0.15s ease-in-out" }}>
         <div className="flex items-center  gap-2">
@@ -418,7 +513,7 @@ export function HomePage() {
             )}
           </div>
         </div>
-        <div className="flex items-start justify-between">
+        <div className="flex items-end justify-between">
           <div className="flex flex-col gap-0.5">
             <div
               className={`text-[30px] tracking-[-0.03em] leading-[34px] text-[#1C1917] font-red-hat font-extrabold`}
@@ -486,18 +581,18 @@ export function HomePage() {
 
       {/* Tab switcher */}
       {renderedFilter === "conversations" && (
-      <div className="flex items-center pt-4 gap-2 px-6 shrink-0" style={{ opacity: tabOpacity, transition: "opacity 0.15s ease-in-out" }}>
+      <div className="flex items-center pt-4 gap-2 px-6 shrink-0 overflow-x-auto" style={{ opacity: tabOpacity, transition: "opacity 0.15s ease-in-out" }}>
         <button
-          onClick={() => setTimeFilter("all")}
-          className={`flex items-center rounded-[20px] py-[7px] px-4 ${
-            timeFilter === "all"
+          onClick={() => { setTimeFilter("all"); setConvShowFilter("all"); }}
+          className={`flex items-center rounded-[20px] py-[7px] px-4 shrink-0 ${
+            timeFilter === "all" && convShowFilter === "all"
               ? "bg-[#1C1917]"
               : "bg-[#F5F5F4]"
           }`}
         >
           <span
             className={`text-[13px] leading-4 font-red-hat ${
-              timeFilter === "all"
+              timeFilter === "all" && convShowFilter === "all"
                 ? "text-[#FAFAF9] font-semibold"
                 : "text-[#78716C] font-medium"
             }`}
@@ -506,14 +601,14 @@ export function HomePage() {
           </span>
         </button>
         <button
-          onClick={() => setTimeFilter("today")}
-          className={`flex items-center rounded-[20px] py-[7px] px-4 ${
-            timeFilter === "today" ? "bg-[#1C1917]" : "bg-[#F5F5F4]"
+          onClick={() => { setTimeFilter("today"); setConvShowFilter("all"); }}
+          className={`flex items-center rounded-[20px] py-[7px] px-4 shrink-0 ${
+            timeFilter === "today" && convShowFilter === "all" ? "bg-[#1C1917]" : "bg-[#F5F5F4]"
           }`}
         >
           <span
             className={`text-[13px] leading-4 font-red-hat ${
-              timeFilter === "today"
+              timeFilter === "today" && convShowFilter === "all"
                 ? "text-[#FAFAF9] font-semibold"
                 : "text-[#78716C] font-medium"
             }`}
@@ -521,6 +616,39 @@ export function HomePage() {
             Today
           </span>
         </button>
+        {convShowFilter !== "all" && (
+          <button
+            onClick={() => {
+              setConvShowFilter("all");
+              setFilterLoading(true);
+              if (filterLoadingRef.current) clearTimeout(filterLoadingRef.current);
+              filterLoadingRef.current = setTimeout(() => {
+                setFilterLoading(false);
+              }, 3000);
+            }}
+            className="flex items-center rounded-[20px] py-[7px] px-4 shrink-0 bg-[#1C1917]"
+          >
+            <span className="text-[13px] leading-4 text-[#FAFAF9] font-red-hat font-semibold">
+              {convShowFilter === "favourites" ? "Favourites" : convShowFilter === "archived" ? "Archived" : "Trash"}
+            </span>
+          </button>
+        )}
+        {convSortBy !== "recent" && (
+          <button
+            onClick={() => {
+              setConvSortBy("recent");
+            }}
+            className="flex items-center gap-1.5 rounded-[20px] py-[7px] px-4 shrink-0 bg-[#F5F5F4]"
+          >
+            <span className="text-[13px] leading-4 text-[#78716C] font-red-hat font-medium">
+              Oldest first
+            </span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#78716C" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        )}
       </div>
       )}
 
@@ -543,13 +671,123 @@ export function HomePage() {
                 onSelect={(dateStr) => setLocation(`/transcript/${dateStr}`)}
               />
             </div>
+          ) : filterLoading ? (
+            <div className="flex flex-col items-center justify-center h-full">
+              <LoadingState size={100} cycleMessages />
+            </div>
+          ) : filteredConversations.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full gap-5">
+              <svg width="140" height="130" viewBox="0 0 140 130" fill="none">
+                <circle cx="30" cy="90" r="3" fill="#D94F3B66" />
+                <circle cx="38" cy="90" r="3" fill="#D94F3B66" />
+                <circle cx="46" cy="90" r="3" fill="#D94F3B66" />
+                <circle cx="54" cy="90" r="3" fill="#D94F3B66" />
+                <circle cx="62" cy="90" r="3" fill="#D94F3B66" />
+                <circle cx="70" cy="90" r="3" fill="#D94F3B66" />
+                <circle cx="78" cy="90" r="3" fill="#D94F3B66" />
+                <circle cx="86" cy="90" r="3" fill="#D94F3B66" />
+                <circle cx="94" cy="90" r="3" fill="#D94F3B66" />
+                <circle cx="102" cy="90" r="3" fill="#D94F3B66" />
+                <circle cx="110" cy="90" r="3" fill="#D94F3B66" />
+                <circle cx="30" cy="58" r="3" fill="#D94F3B59" />
+                <circle cx="38" cy="58" r="3" fill="#D94F3B59" />
+                <circle cx="46" cy="58" r="3" fill="#D94F3B59" />
+                <circle cx="54" cy="58" r="3" fill="#D94F3B59" />
+                <circle cx="62" cy="58" r="3" fill="#D94F3B59" />
+                <circle cx="70" cy="58" r="3" fill="#D94F3B59" />
+                <circle cx="70" cy="66" r="2.5" fill="#D94F3B59" />
+                <circle cx="70" cy="74" r="2" fill="#D94F3B59" />
+                <circle cx="70" cy="82" r="2.5" fill="#D94F3B59" />
+
+                <circle cx="78" cy="58" r="3" fill="#D94F3B59" />
+                <circle cx="86" cy="58" r="3" fill="#D94F3B59" />
+                <circle cx="94" cy="58" r="3" fill="#D94F3B59" />
+                <circle cx="102" cy="58" r="3" fill="#D94F3B59" />
+                <circle cx="110" cy="58" r="3" fill="#D94F3B59" />
+                <circle cx="30" cy="66" r="3" fill="#D94F3B59" />
+                <circle cx="30" cy="74" r="3" fill="#D94F3B59" />
+                <circle cx="30" cy="82" r="3" fill="#D94F3B59" />
+                <circle cx="110" cy="66" r="3" fill="#D94F3B59" />
+                <circle cx="110" cy="74" r="3" fill="#D94F3B59" />
+                <circle cx="110" cy="82" r="3" fill="#D94F3B59" />
+                <circle cx="25" cy="51" r="2.5" fill="#D94F3B38" />
+                <circle cx="33" cy="51" r="2.5" fill="#D94F3B38" />
+                <circle cx="41" cy="51" r="2.5" fill="#D94F3B38" />
+                <circle cx="49" cy="51" r="2.5" fill="#D94F3B38" />
+                <circle cx="57" cy="51" r="2.5" fill="#D94F3B38" />
+                <circle cx="65" cy="51" r="2.5" fill="#D94F3B38" />
+                <circle cx="20" cy="44" r="2.5" fill="#D94F3B29" />
+                <circle cx="28" cy="44" r="2.5" fill="#D94F3B29" />
+                <circle cx="36" cy="44" r="2.5" fill="#D94F3B29" />
+                <circle cx="44" cy="44" r="2.5" fill="#D94F3B29" />
+                <circle cx="52" cy="44" r="2.5" fill="#D94F3B29" />
+                <circle cx="60" cy="44" r="2.5" fill="#D94F3B29" />
+                <circle cx="15" cy="37" r="2" fill="#D94F3B1A" />
+                <circle cx="23" cy="37" r="2" fill="#D94F3B1A" />
+                <circle cx="31" cy="37" r="2" fill="#D94F3B1A" />
+                <circle cx="39" cy="37" r="2" fill="#D94F3B1A" />
+                <circle cx="47" cy="37" r="2" fill="#D94F3B1A" />
+                <circle cx="55" cy="37" r="2" fill="#D94F3B1A" />
+                <circle cx="75" cy="51" r="2.5" fill="#D94F3B38" />
+                <circle cx="83" cy="51" r="2.5" fill="#D94F3B38" />
+                <circle cx="91" cy="51" r="2.5" fill="#D94F3B38" />
+                <circle cx="99" cy="51" r="2.5" fill="#D94F3B38" />
+                <circle cx="107" cy="51" r="2.5" fill="#D94F3B38" />
+                <circle cx="115" cy="51" r="2.5" fill="#D94F3B38" />
+                <circle cx="80" cy="44" r="2.5" fill="#D94F3B29" />
+                <circle cx="88" cy="44" r="2.5" fill="#D94F3B29" />
+                <circle cx="96" cy="44" r="2.5" fill="#D94F3B29" />
+                <circle cx="104" cy="44" r="2.5" fill="#D94F3B29" />
+                <circle cx="112" cy="44" r="2.5" fill="#D94F3B29" />
+                <circle cx="120" cy="44" r="2.5" fill="#D94F3B29" />
+                <circle cx="85" cy="37" r="2" fill="#D94F3B1A" />
+                <circle cx="93" cy="37" r="2" fill="#D94F3B1A" />
+                <circle cx="101" cy="37" r="2" fill="#D94F3B1A" />
+                <circle cx="109" cy="37" r="2" fill="#D94F3B1A" />
+                <circle cx="117" cy="37" r="2" fill="#D94F3B1A" />
+                <circle cx="125" cy="37" r="2" fill="#D94F3B1A" />
+                <circle cx="46" cy="68" r="2" fill="#D94F3B0F" />
+                <circle cx="62" cy="72" r="1.5" fill="#D94F3B0D" />
+                <circle cx="78" cy="66" r="1.5" fill="#D94F3B0D" />
+                <circle cx="55" cy="78" r="1.5" fill="#D94F3B0A" />
+                <circle cx="85" cy="76" r="1.5" fill="#D94F3B0A" />
+                <circle cx="70" cy="82" r="2" fill="#D94F3B0A" />
+              </svg>
+              <div className="tracking-[0.01em] text-[#D94F3B8C] font-red-hat font-medium text-[18px] leading-[22px]">
+                Nothing found
+              </div>
+              <div className="tracking-[0.02em] text-[#968C82B3] font-red-hat text-[13px] leading-4">
+                {convShowFilter === "trash"
+                  ? "Your trash is empty"
+                  : convShowFilter === "archived"
+                    ? "No archived conversations"
+                    : convShowFilter === "favourites"
+                      ? "No favourite conversations yet"
+                      : "Try adjusting your search or filters"}
+              </div>
+            </div>
           ) : (
-            <ConversationList
-              conversations={filteredConversations}
-              onSelectConversation={handleSelectConversation}
-              onArchive={handleArchiveConversation}
-              onDelete={handleDeleteConversation}
-            />
+            <>
+              {convShowFilter === "trash" && trashedConversationCount > 0 && (
+                <div className="flex items-center justify-between px-6 py-3">
+                  <span className="text-[13px] leading-4 text-[#A8A29E] font-red-hat font-medium">
+                    {trashedConversationCount} {trashedConversationCount === 1 ? "conversation" : "conversations"} in trash
+                  </span>
+                  <button
+                    onClick={() => setShowEmptyTrashConfirm(true)}
+                    className="text-[13px] leading-4 text-[#DC2626] font-red-hat font-semibold"
+                  >
+                    Empty Trash
+                  </button>
+                </div>
+              )}
+              <ConversationList
+                conversations={filteredConversations}
+                onSelectConversation={handleSelectConversation}
+                onArchive={handleArchiveConversation}
+                onDelete={handleDeleteConversation}
+              />
+            </>
           )}
         </div>
       </div>
@@ -564,14 +802,15 @@ export function HomePage() {
       />
 
       {/* Filter Drawer */}
-      <FilterDrawer
+      <ConversationFilterDrawer
         isOpen={isFilterOpen}
         onClose={() => setIsFilterOpen(false)}
-        activeFilter={activeFilter}
-        activeView={activeView}
-        onFilterChange={handleFilterChange}
-        onViewChange={handleViewChange}
-        counts={filterCounts}
+        sortBy={convSortBy}
+        dateRange={convDateRange}
+        showFilter={convShowFilter}
+        customStart={convCustomStart}
+        customEnd={convCustomEnd}
+        onApply={handleFilterApply}
       />
 
       {/* Global AI Chat */}
@@ -598,9 +837,9 @@ export function HomePage() {
               <Drawer.Description
                 className={`text-sm text-[#A8A29E] text-center mt-3 font-red-hat`}
               >
-                You are about to permanently delete all {filterCounts.trash}{" "}
-                items in trash. This will remove all transcripts, notes, and
-                chat history. You will not be able to recover them.
+                You are about to permanently delete {trashedConversationCount}{" "}
+                {trashedConversationCount === 1 ? "conversation" : "conversations"}.
+                This cannot be undone. Are you sure?
               </Drawer.Description>
               <div className="flex gap-3 mt-6">
                 <button

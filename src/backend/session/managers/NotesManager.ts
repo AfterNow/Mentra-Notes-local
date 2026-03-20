@@ -6,7 +6,7 @@
  */
 
 import { SyncedManager, synced, rpc } from "../../../lib/sync";
-import { Note, createNote, getNotes, updateNote, deleteNote } from "../../models";
+import { Note, createNote, getNotes, updateNote, deleteNote, getDailyTranscript } from "../../models";
 import {
   createProviderFromEnv,
   isProviderAvailable,
@@ -60,6 +60,57 @@ export class NotesManager extends SyncedManager {
       this.timeManager = new TimeManager(timezone);
     }
     return this.timeManager;
+  }
+
+  /**
+   * Load transcript segments for a specific date from MongoDB or R2.
+   */
+  private async loadSegmentsForDate(date: string): Promise<TranscriptSegment[]> {
+    const userId = this._session?.userId;
+    if (!userId) return [];
+
+    try {
+      // Try MongoDB first
+      const dailyTranscript = await getDailyTranscript(userId, date);
+      if (dailyTranscript?.segments?.length) {
+        return dailyTranscript.segments.map((s, i) => ({
+          id: `seg_${date}_${i}`,
+          text: s.text,
+          timestamp: s.timestamp,
+          isFinal: s.isFinal,
+          speakerId: s.speakerId,
+          type: s.type,
+          photoUrl: s.photoUrl,
+          photoMimeType: s.photoMimeType,
+          photoDescription: s.photoDescription,
+          timezone: s.timezone,
+        }));
+      }
+
+      // Fallback to R2
+      const r2Manager = (this._session as any)?.r2;
+      if (r2Manager) {
+        const r2Data = await r2Manager.fetchTranscript(date);
+        if (r2Data?.segments?.length) {
+          return r2Data.segments.map((seg: any, idx: number) => ({
+            id: `seg_${seg.index || idx + 1}`,
+            text: seg.text,
+            timestamp: new Date(seg.timestamp),
+            isFinal: seg.isFinal,
+            speakerId: seg.speakerId,
+            type: seg.type,
+            photoUrl: seg.photoUrl,
+            photoMimeType: seg.photoMimeType,
+            photoDescription: seg.photoDescription,
+            timezone: seg.timezone,
+          }));
+        }
+      }
+    } catch (error) {
+      console.error(`[NotesManager] Failed to load segments for ${date}:`, error);
+    }
+
+    return [];
   }
 
   private getFileManager(): FileManager | null {
@@ -226,9 +277,19 @@ export class NotesManager extends SyncedManager {
       : undefined;
 
     try {
-      // Get transcript context from session
+      // Get transcript context — try in-memory first, then MongoDB, then R2
       const transcriptManager = (this._session as any)?.transcript;
-      const segments: TranscriptSegment[] = transcriptManager?.segments ?? [];
+      let segments: TranscriptSegment[] = transcriptManager?.segments ?? [];
+
+      // For historical dates, load segments from MongoDB/R2
+      if (startDate) {
+        const segmentDate = this.getTimeManager().toDateString(startDate);
+        const today = this.getTimeManager().today();
+
+        if (segmentDate !== today || segments.length === 0) {
+          segments = await this.loadSegmentsForDate(segmentDate);
+        }
+      }
 
       // Filter segments by time range if provided
       let relevantSegments = segments;

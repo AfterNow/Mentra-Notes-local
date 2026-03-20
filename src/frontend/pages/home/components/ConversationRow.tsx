@@ -61,12 +61,22 @@ export const ConversationRow = memo(function ConversationRow({
           className="flex items-center justify-center w-[72px] bg-[#1C1917]"
         >
           <div className="flex flex-col items-center gap-[3px]">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-              <path d="M21 8v13H3V8" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              <rect x="1" y="3" width="22" height="5" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M10 12h4" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <span className="text-[10px] leading-3 text-white font-red-hat font-semibold">Archive</span>
+            {conversation.isArchived ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <path d="M21 8v13H3V8" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <rect x="1" y="3" width="22" height="5" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M9 12l2 2 4-4" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <path d="M21 8v13H3V8" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <rect x="1" y="3" width="22" height="5" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M10 12h4" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+            <span className="text-[10px] leading-3 text-white font-red-hat font-semibold">
+              {conversation.isArchived ? "Unarchive" : "Archive"}
+            </span>
           </div>
         </motion.button>
         <motion.button
@@ -80,7 +90,9 @@ export const ConversationRow = memo(function ConversationRow({
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
               <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            <span className="text-[10px] leading-3 text-white font-red-hat font-semibold">Delete</span>
+            <span className="text-[10px] leading-3 text-white font-red-hat font-semibold">
+              {conversation.isTrashed ? "Delete" : "Trash"}
+            </span>
           </div>
         </motion.button>
       </div>

@@ -103,17 +103,7 @@ export function CollectionsPage() {
         </svg>
       ),
     },
-    {
-      id: "action-items",
-      label: "Action Items",
-      count: actionItemsCount,
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A8A29E" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-          <circle cx="12" cy="12" r="10" />
-          <polyline points="12 6 12 12 16 14" />
-        </svg>
-      ),
-    },
+    
   ];
 
   // Build folder grid with "New Folder" button at the end
@@ -243,44 +233,36 @@ export function CollectionsPage() {
           </div>
           <div className="flex flex-col gap-2.5">
             {Array.from({ length: Math.ceil((folderItems.length + 1) / 2) }, (_, rowIdx) => {
-              const f1 = folderItems[rowIdx * 2];
-              const f2 = folderItems[rowIdx * 2 + 1];
+              const startIdx = rowIdx * 2;
+              const items: React.ReactNode[] = [];
 
-              return (
-                <div key={rowIdx} className="flex gap-2.5">
-                  {f1 && (
+              for (let col = 0; col < 2; col++) {
+                const idx = startIdx + col;
+                const folder = folderItems[idx];
+
+                if (folder) {
+                  items.push(
                     <button
-                      onClick={() => setLocation(`/folder/${f1.id}`)}
+                      key={folder.id}
+                      onClick={() => setLocation(`/folder/${folder.id}`)}
                       className="flex flex-col grow shrink basis-0 rounded-xl overflow-hidden bg-[#FAFAF9] border border-[#E7E5E4] text-left"
                     >
-                      <div className="h-1 shrink-0" style={{ backgroundColor: FOLDER_COLOR_MAP[f1.color] }} />
+                      <div className="h-1 shrink-0" style={{ backgroundColor: FOLDER_COLOR_MAP[folder.color] }} />
                       <div className="flex flex-col py-3 px-3.5 gap-0.5">
                         <div className="text-[14px] leading-[18px] text-[#1C1917] font-red-hat font-semibold">
-                          {f1.name}
+                          {folder.name}
                         </div>
                         <div className="text-[12px] leading-4 text-[#A8A29E] font-red-hat">
-                          {folderNoteCounts[f1.id] || 0} notes
+                          {folderNoteCounts[folder.id] || 0} notes
                         </div>
                       </div>
                     </button>
-                  )}
-                  {f2 ? (
+                  );
+                } else if (idx === folderItems.length) {
+                  // "New Folder" button — only rendered once, right after the last folder
+                  items.push(
                     <button
-                      onClick={() => setLocation(`/folder/${f2.id}`)}
-                      className="flex flex-col grow shrink basis-0 rounded-xl overflow-hidden bg-[#FAFAF9] border border-[#E7E5E4] text-left"
-                    >
-                      <div className="h-1 shrink-0" style={{ backgroundColor: FOLDER_COLOR_MAP[f2.color] }} />
-                      <div className="flex flex-col py-3 px-3.5 gap-0.5">
-                        <div className="text-[14px] leading-[18px] text-[#1C1917] font-red-hat font-semibold">
-                          {f2.name}
-                        </div>
-                        <div className="text-[12px] leading-4 text-[#A8A29E] font-red-hat">
-                          {folderNoteCounts[f2.id] || 0} notes
-                        </div>
-                      </div>
-                    </button>
-                  ) : (
-                    <button
+                      key="new-folder"
                       onClick={() => setShowCreateFolder(true)}
                       className="flex grow shrink basis-0 items-center justify-center rounded-xl py-3 px-3.5 gap-1.5 bg-[#FAFAF9] border border-dashed border-[#D6D3D1]"
                     >
@@ -292,28 +274,19 @@ export function CollectionsPage() {
                         New Folder
                       </span>
                     </button>
-                  )}
+                  );
+                } else {
+                  // Empty spacer for alignment
+                  items.push(<div key="spacer" className="grow shrink basis-0" />);
+                }
+              }
+
+              return (
+                <div key={rowIdx} className="flex gap-2.5">
+                  {items}
                 </div>
               );
             })}
-            {/* If even number of folders, add New Folder on its own row */}
-            {folderItems.length % 2 === 0 && (
-              <div className="flex gap-2.5">
-                <button
-                  onClick={() => setShowCreateFolder(true)}
-                  className="flex grow shrink basis-0 items-center justify-center rounded-xl py-3 px-3.5 gap-1.5 bg-[#FAFAF9] border border-dashed border-[#D6D3D1]"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A8A29E" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="12" y1="5" x2="12" y2="19" />
-                    <line x1="5" y1="12" x2="19" y2="12" />
-                  </svg>
-                  <span className="text-[13px] leading-4 text-[#A8A29E] font-red-hat font-medium">
-                    New Folder
-                  </span>
-                </button>
-                <div className="grow shrink basis-0" />
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -330,6 +303,7 @@ export function CollectionsPage() {
         isOpen={showCreateFolder}
         onClose={() => setShowCreateFolder(false)}
         onCreate={handleCreateFolder}
+        existingNames={folders.map((f) => f.name)}
       />
     </div>
   );

@@ -1,18 +1,16 @@
 /**
  * DropdownMenu - Reusable dropdown menu component
  *
- * A dynamic dropdown menu that can be used throughout the app.
+ * Smooth scale/opacity animation, closes on outside click or Escape.
  * Supports icons, labels, descriptions, dividers, and danger states.
  */
 
 import { useState, useRef, useEffect, type ReactNode } from "react";
-import { clsx } from "clsx";
-import { MoreHorizontal, type LucideIcon } from "lucide-react";
 
 export interface DropdownMenuItem {
   id: string;
   label: string;
-  icon?: LucideIcon;
+  icon?: ReactNode;
   description?: string;
   onClick: () => void;
   danger?: boolean;
@@ -27,14 +25,10 @@ export type DropdownMenuOption = DropdownMenuItem | DropdownMenuDivider;
 
 interface DropdownMenuProps {
   options: DropdownMenuOption[];
-  /** Custom trigger element. If not provided, uses a MoreHorizontal icon button */
+  /** Custom trigger element. If not provided, uses a 3-dot icon */
   trigger?: ReactNode;
   /** Alignment of the dropdown relative to trigger */
   align?: "left" | "right";
-  /** Size of the default trigger icon */
-  iconSize?: number;
-  /** Additional class names for the trigger button */
-  triggerClassName?: string;
 }
 
 function isDivider(option: DropdownMenuOption): option is DropdownMenuDivider {
@@ -45,35 +39,25 @@ export function DropdownMenu({
   options,
   trigger,
   align = "right",
-  iconSize = 20,
-  triggerClassName,
 }: DropdownMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close on click outside
   useEffect(() => {
     if (!isOpen) return;
 
     const handleClickOutside = (event: MouseEvent) => {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(event.target as Node)
-      ) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
         setIsOpen(false);
       }
     };
 
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsOpen(false);
-      }
+      if (event.key === "Escape") setIsOpen(false);
     };
 
     document.addEventListener("mousedown", handleClickOutside);
     document.addEventListener("keydown", handleEscape);
-
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("keydown", handleEscape);
@@ -89,74 +73,58 @@ export function DropdownMenu({
   return (
     <div ref={containerRef} className="relative inline-block">
       {/* Trigger */}
-      {trigger ? (
-        <div onClick={() => setIsOpen(!isOpen)}>{trigger}</div>
-      ) : (
-        <button
-          onClick={() => setIsOpen(!isOpen)}
-          className={clsx(
-            "p-2 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors pr-6",
-            triggerClassName,
-          )}
-        >
-          <MoreHorizontal size={iconSize} />
-        </button>
-      )}
+      <div onClick={() => setIsOpen(!isOpen)} className="cursor-pointer">
+        {trigger ?? (
+          <button className="p-1">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="6" r="1.5" fill="#52525B" />
+              <circle cx="12" cy="12" r="1.5" fill="#52525B" />
+              <circle cx="12" cy="18" r="1.5" fill="#52525B" />
+            </svg>
+          </button>
+        )}
+      </div>
 
-      {/* Dropdown Menu */}
+      {/* Menu */}
       {isOpen && (
         <div
-          ref={menuRef}
-          className={clsx(
-            "absolute top-full mt-1 z-50 min-w-[240px] py-1",
-            "bg-white dark:bg-zinc-900 rounded-xl shadow-lg",
-            "border border-zinc-200 dark:border-zinc-800",
-            "animate-in fade-in-0 zoom-in-95 duration-100",
-            align === "right" ? "right-0" : "left-0",
-          )}
+          className={`absolute top-full mt-1.5 z-50 min-w-44 bg-[#FAFAF9] border border-[#E7E5E4] rounded-xl py-1 ${
+            align === "right" ? "right-0" : "left-0"
+          }`}
+          style={{
+            boxShadow: "0px 4px 16px rgba(0,0,0,0.08)",
+            animation: "dropdown-in 0.15s ease-out",
+          }}
         >
+          <style>{`
+            @keyframes dropdown-in {
+              from { opacity: 0; transform: scale(0.95) translateY(-4px); }
+              to { opacity: 1; transform: scale(1) translateY(0); }
+            }
+          `}</style>
           {options.map((option, index) => {
             if (isDivider(option)) {
-              return (
-                <div
-                  key={`divider-${index}`}
-                  className="my-1 border-t border-zinc-200 dark:border-zinc-800"
-                />
-              );
+              return <div key={`divider-${index}`} className="my-1 mx-3 border-t border-[#F5F5F4]" />;
             }
-
-            const Icon = option.icon;
 
             return (
               <button
                 key={option.id}
                 onClick={() => handleOptionClick(option)}
                 disabled={option.disabled}
-                className={clsx(
-                  "w-full flex items-center gap-3 px-3 py-2 text-left transition-colors",
+                className={`w-full flex items-center gap-3 px-4 py-2.5 text-left text-[14px] leading-[18px] font-red-hat font-medium transition-colors ${
                   option.disabled
-                    ? "opacity-50 cursor-not-allowed"
+                    ? "text-[#D6D3D1] cursor-not-allowed"
                     : option.danger
-                      ? "text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30"
-                      : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800",
-                )}
+                      ? "text-[#DC2626] active:bg-[#FEE2E2]"
+                      : "text-[#1C1917] active:bg-[#F5F5F4]"
+                }`}
               >
-                {Icon && (
-                  <Icon
-                    size={18}
-                    className={clsx(
-                      option.danger
-                        ? "text-red-500"
-                        : "text-zinc-400 dark:text-zinc-500",
-                    )}
-                  />
-                )}
+                {option.icon && <span className="shrink-0">{option.icon}</span>}
                 <div className="flex-1 min-w-0">
-                  <span className="block text-sm font-medium">
-                    {option.label}
-                  </span>
+                  <span className="block">{option.label}</span>
                   {option.description && (
-                    <span className="block text-xs text-zinc-500 dark:text-zinc-400 truncate">
+                    <span className="block text-[12px] leading-4 text-[#A8A29E] font-normal truncate">
                       {option.description}
                     </span>
                   )}

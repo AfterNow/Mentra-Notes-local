@@ -103,6 +103,9 @@ export interface Conversation {
   aiSummary: string;
   generatingSummary: boolean;
   noteId: string | null;
+  isFavourite: boolean;
+  isArchived: boolean;
+  isTrashed: boolean;
   chunks: ConversationChunk[];
   segments: ConversationSegment[];
 }
@@ -257,6 +260,13 @@ export interface ConversationManagerI {
   // RPCs
   deleteConversation(conversationId: string): Promise<void>;
   linkNoteToConversation(conversationId: string, noteId: string): Promise<void>;
+  favouriteConversation(conversationId: string): Promise<void>;
+  unfavouriteConversation(conversationId: string): Promise<void>;
+  archiveConversation(conversationId: string): Promise<void>;
+  unarchiveConversation(conversationId: string): Promise<void>;
+  trashConversation(conversationId: string): Promise<void>;
+  untrashConversation(conversationId: string): Promise<void>;
+  emptyTrash(): Promise<number>;
 }
 
 export interface FileManagerI {

@@ -349,7 +349,7 @@ export function TranscriptPage() {
 
       {/* Bottom bar — shown when recording (active or paused) */}
       {isToday && (
-        <div className="flex items-center shrink-0 pt-3.5 pb-8 gap-4 bg-white border-t border-[#F0EEE9] px-6">
+        <div className="flex items-center shrink-0 pt-3.5 pb-4 gap-4 bg-white border-t border-[#F0EEE9] px-6">
           <div className="grow flex flex-col gap-0.5">
             <div className="flex items-center gap-1.5">
               {transcriptionPaused ? (

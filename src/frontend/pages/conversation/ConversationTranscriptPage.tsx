@@ -169,7 +169,7 @@ export function ConversationTranscriptPage() {
       </div>
 
       {/* Bottom bar */}
-      <div className="flex items-center shrink-0 pt-3.5 pb-8 gap-4 bg-white border-t border-[#F0EEE9] px-6">
+      <div className="flex items-center shrink-0 pt-3.5 pb-3.5 gap-4 bg-white border-t border-[#F0EEE9] px-6">
         <div className="grow flex flex-col gap-0.5">
           <div className="flex items-center gap-1.5">
             {isActive ? <WaveIndicator /> : <div className="w-2 h-2 rounded-full bg-[#A8A29E]" />}
