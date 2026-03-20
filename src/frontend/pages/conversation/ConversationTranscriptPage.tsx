@@ -122,6 +122,7 @@ export function ConversationTranscriptPage() {
         }, 5000);
       }
     };
+    
 
     container.addEventListener("touchstart", handleTouchStart, { passive: true });
     container.addEventListener("touchend", handleTouchEnd, { passive: true });
