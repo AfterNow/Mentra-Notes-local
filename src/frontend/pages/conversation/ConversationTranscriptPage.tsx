@@ -8,13 +8,15 @@
  * - Bottom bar: elapsed timer + Stop button (ends transcription + conversation)
  */
 
-import { useMemo, useEffect, useRef, useState } from "react";
+import { useMemo, useEffect, useState } from "react";
 import { useLocation, useParams } from "wouter";
 import { useMentraAuth } from "@mentra/react";
 import { format } from "date-fns";
 import { useSynced } from "../../hooks/useSynced";
+import { useAutoScroll } from "../../hooks/useAutoScroll";
 import { WaveIndicator } from "../../components/shared/WaveIndicator";
 import type { SessionI, TranscriptSegment } from "../../../shared/types";
+import { ArrowDown } from "lucide-react";
 
 /** Stable speakerId string → sequential color index */
 function buildSpeakerMap(segments: TranscriptSegment[]): Map<string, number> {
@@ -45,11 +47,10 @@ export function ConversationTranscriptPage() {
   const { userId } = useMentraAuth();
   const { session } = useSynced<SessionI>(userId || "");
   const [, setLocation] = useLocation();
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [lockedToBottom, setLockedToBottom] = useState(true);
-  const userScrollingRef = useRef(false);
+  const { scrollContainerRef, showScrollButton, scrollToBottom } = useAutoScroll({
+    deps: [!!session],
+  });
 
   const conversation = useMemo(() => {
     return (session?.conversation?.conversations ?? []).find((c) => c.id === id) ?? null;
@@ -79,68 +80,6 @@ export function ConversationTranscriptPage() {
     return () => clearInterval(id);
   }, [conversation?.startTime]);
 
-  // Detect user scroll — 5s grace period before unlocking
-  const unlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-
-    const getDistance = () => {
-      const { scrollTop, scrollHeight, clientHeight } = container;
-      return scrollHeight - scrollTop - clientHeight;
-    };
-
-    const handleTouchStart = () => { userScrollingRef.current = true; };
-    const handleTouchEnd = () => { userScrollingRef.current = false; };
-
-    const handleScroll = () => {
-      const distance = getDistance();
-
-      // Near bottom — re-lock immediately and cancel any pending unlock
-      if (distance < 200) {
-        if (unlockTimerRef.current) {
-          clearTimeout(unlockTimerRef.current);
-          unlockTimerRef.current = null;
-        }
-        setLockedToBottom(true);
-        return;
-      }
-
-      // User scrolled away — start 5s grace period (if not already started)
-      if (userScrollingRef.current && !unlockTimerRef.current && lockedToBottom) {
-        unlockTimerRef.current = setTimeout(() => {
-          unlockTimerRef.current = null;
-          // After 5s, check if still far from bottom
-          if (getDistance() > 200) {
-            setLockedToBottom(false);
-          } else {
-            // They scrolled back — auto-scroll to bottom
-            setLockedToBottom(true);
-            bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-          }
-        }, 5000);
-      }
-    };
-    
-
-    container.addEventListener("touchstart", handleTouchStart, { passive: true });
-    container.addEventListener("touchend", handleTouchEnd, { passive: true });
-    container.addEventListener("scroll", handleScroll, { passive: true });
-    return () => {
-      container.removeEventListener("touchstart", handleTouchStart);
-      container.removeEventListener("touchend", handleTouchEnd);
-      container.removeEventListener("scroll", handleScroll);
-      if (unlockTimerRef.current) clearTimeout(unlockTimerRef.current);
-    };
-  }, [lockedToBottom]);
-
-  // Auto-scroll to bottom on new segments or interim text (only if locked)
-  useEffect(() => {
-    if (lockedToBottom) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [liveSegments.length, interimText, lockedToBottom]);
 
   const handleStop = () => {
     session?.settings?.updateSettings({ transcriptionPaused: true });
@@ -224,26 +163,22 @@ export function ConversationTranscriptPage() {
               </div>
             )}
 
-            <div ref={bottomRef} />
+            <div />
           </div>
         )}
       </div>
 
       {/* Jump to bottom button */}
-      {!lockedToBottom && liveSegments.length > 0 && (
+      {showScrollButton && liveSegments.length > 0 && (
         <button
-          onClick={() => {
-            setLockedToBottom(true);
-            bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-          }}
-          className="absolute bottom-24 left-6 z-10 flex items-center gap-1.5 rounded-full py-2 px-3.5 bg-[#1C1917] shadow-lg active:scale-95 transition-transform"
+          onClick={scrollToBottom}
+          className="absolute bottom-41 right-8 z-20 w-9 h-9 rounded-full bg-[#1C1917] text-white flex items-center justify-center shadow-lg"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FAFAF9" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
-          <span className="text-[12px] font-red-hat font-semibold text-[#FAFAF9]">Latest</span>
+          <ArrowDown size={18} />
         </button>
       )}
+
+      
 
       {/* Bottom bar */}
       <div className="flex items-center shrink-0 pt-3.5 pb-3.5 gap-4 bg-white border-t border-[#F0EEE9] px-6">

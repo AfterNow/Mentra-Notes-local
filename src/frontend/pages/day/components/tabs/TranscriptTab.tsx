@@ -349,7 +349,6 @@ export function TranscriptTab({
   const handleContentReady = useCallback((hourKey: string) => {
     // Stop the pin loop now that content is laid out
     pinningHourRef.current = null;
-    suppressAutoScrollRef.current = false;
 
     activeScrollHourRef.current = hourKey;
     // Use rAF to ensure DOM has painted the content before measuring
@@ -402,8 +401,7 @@ export function TranscriptTab({
       // Collapsing — clear all tracking: pin loop, auto-scroll suppression, active scroll
       pinningHourRef.current = null;
       activeScrollHourRef.current = null;
-      suppressAutoScrollRef.current = false;
-      setLoadingHours((prev) => {
+        setLoadingHours((prev) => {
         const newSet = new Set(prev);
         newSet.delete(hourKey);
         return newSet;
@@ -437,7 +435,6 @@ export function TranscriptTab({
       });
 
       // Suppress MutationObserver auto-scroll so it doesn't fight our scroll-to-header
-      suppressAutoScrollRef.current = true;
 
       // Smooth-scroll header to top after React renders the expanded state
       requestAnimationFrame(() => {
@@ -456,73 +453,83 @@ export function TranscriptTab({
         });
         // Re-enable auto-scroll after content animation starts
         setTimeout(() => {
-          suppressAutoScrollRef.current = false;
-        }, 400);
+              }, 400);
       }, 1000);
     }
   };
 
-  // Lock/unlock scroll: when locked (near bottom), auto-scroll on DOM changes.
-  // When unlocked (user scrolled up), stop auto-scrolling and show a FAB to re-lock.
+  // Scroll button + auto-scroll only when at the bottom.
+  // Touch scroll up → unlock. Button or manual scroll back to bottom → re-lock.
   const isLive = currentHour !== undefined;
-  const [isScrollLocked, setIsScrollLocked] = useState(true);
-  const isScrollLockedRef = useRef(true);
-  const suppressAutoScrollRef = useRef(false);
-
-  // Suppress auto-scroll briefly when compact mode changes to prevent layout shift
-  useEffect(() => {
-    suppressAutoScrollRef.current = true;
-    const timer = setTimeout(() => { suppressAutoScrollRef.current = false; }, 200);
-    return () => clearTimeout(timer);
-  }, [isCompactMode]);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const lockedRef = useRef(true);
+  const touchingRef = useRef(false);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
 
-    const LOCK_THRESHOLD = 100;
+    lockedRef.current = true;
+    setShowScrollButton(false);
 
-    // Update lock state based on scroll position
-    const handleScroll = () => {
+    const isNearBottom = () => {
       const { scrollTop, scrollHeight, clientHeight } = container;
-      const distFromBottom = scrollHeight - scrollTop - clientHeight;
-      const locked = distFromBottom <= LOCK_THRESHOLD;
-      isScrollLockedRef.current = locked;
-      setIsScrollLocked(locked);
+      return scrollHeight - scrollTop - clientHeight < 100;
     };
 
-    // Auto-scroll on DOM mutations only when locked and not suppressed.
-    // Debounced so rapid interim text updates don't spawn competing smooth scrolls.
-    let scrollRaf: number | null = null;
+    let scrollAtTouchStart = 0;
+
+    const handleTouchStart = () => {
+      touchingRef.current = true;
+      scrollAtTouchStart = container.scrollTop;
+    };
+    const handleTouchEnd = () => {
+      touchingRef.current = false;
+    };
+
+    const handleScroll = () => {
+      if (!touchingRef.current) return;
+      // User scrolled up → unlock immediately
+      if (container.scrollTop < scrollAtTouchStart) {
+        lockedRef.current = false;
+        setShowScrollButton(true);
+      }
+      // User scrolled back to bottom → re-lock
+      if (isNearBottom()) {
+        lockedRef.current = true;
+        setShowScrollButton(false);
+      }
+    };
+
+    // Auto-scroll on new content only when locked
     const observer = new MutationObserver(() => {
-      if (!isScrollLockedRef.current || suppressAutoScrollRef.current) return;
-      if (scrollRaf) cancelAnimationFrame(scrollRaf);
-      scrollRaf = requestAnimationFrame(() => {
+      if (!lockedRef.current) return;
+      requestAnimationFrame(() => {
         container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
-        scrollRaf = null;
       });
     });
 
+    container.addEventListener("touchstart", handleTouchStart, { passive: true });
+    container.addEventListener("touchend", handleTouchEnd, { passive: true });
+    container.addEventListener("scroll", handleScroll, { passive: true });
     observer.observe(container, { childList: true, subtree: true, characterData: true });
-    container.addEventListener("scroll", handleScroll);
 
-    // Initial scroll to bottom (instant — covers both first mount and post-reconnect)
     container.scrollTo({ top: container.scrollHeight, behavior: "instant" });
 
     return () => {
-      if (scrollRaf) cancelAnimationFrame(scrollRaf);
-      observer.disconnect();
+      container.removeEventListener("touchstart", handleTouchStart);
+      container.removeEventListener("touchend", handleTouchEnd);
       container.removeEventListener("scroll", handleScroll);
+      observer.disconnect();
     };
   }, [isLoading]);
 
-  // Scroll to bottom and re-lock
-  const scrollToBottomAndLock = useCallback(() => {
+  const scrollToBottom = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
-    container.scrollTo({ top: container.scrollHeight, behavior: "instant" });
-    isScrollLockedRef.current = true;
-    setIsScrollLocked(true);
+    lockedRef.current = true;
+    setShowScrollButton(false);
+    container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
   }, []);
 
 
@@ -803,9 +810,9 @@ export function TranscriptTab({
     </div>
 
       {/* Scroll-to-bottom FAB */}
-      {isLive && !isScrollLocked && (
+      {showScrollButton && (
         <button
-          onClick={scrollToBottomAndLock}
+          onClick={scrollToBottom}
           className="absolute bottom-4 left-1 z-20 w-9 h-9 rounded-full bg-[#1C1917] text-white flex items-center justify-center shadow-lg"
         >
           <ArrowDown size={18} />
