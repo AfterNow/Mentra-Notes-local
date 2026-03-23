@@ -14,6 +14,7 @@ export interface MultiSelectAction {
   label: string;
   onClick: () => void;
   variant?: "default" | "danger";
+  disabled?: boolean;
 }
 
 interface MultiSelectBarProps {
@@ -32,8 +33,9 @@ export function MultiSelectBar({ actions }: MultiSelectBarProps) {
       {actions.map((action) => (
         <button
           key={action.label}
-          onClick={action.onClick}
-          className="flex flex-col items-center gap-1"
+          onClick={action.disabled ? undefined : action.onClick}
+          disabled={action.disabled}
+          className={`flex flex-col items-center gap-1 ${action.disabled ? "opacity-30" : ""}`}
         >
           {action.icon}
           <span
@@ -65,6 +67,17 @@ export function MoveIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
       <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" stroke="#1C1917" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function MergeIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+      <path d="M8 6l4 4 4-4" stroke="#1C1917" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+      <line x1="12" y1="10" x2="12" y2="22" stroke="#1C1917" strokeWidth="1.75" strokeLinecap="round" />
+      <line x1="8" y1="2" x2="8" y2="6" stroke="#1C1917" strokeWidth="1.75" strokeLinecap="round" />
+      <line x1="16" y1="2" x2="16" y2="6" stroke="#1C1917" strokeWidth="1.75" strokeLinecap="round" />
     </svg>
   );
 }

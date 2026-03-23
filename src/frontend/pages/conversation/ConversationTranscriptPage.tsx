@@ -116,7 +116,7 @@ export function ConversationTranscriptPage() {
       </div>
 
       {/* Segments */}
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-6 pb-4 relative">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-6 pb-20 relative">
         {liveSegments.length === 0 && !interimText ? (
           <div className="flex flex-col items-center justify-center h-full gap-3">
             <WaveIndicator color="#A8A29E" height={16} barWidth={3} gap={3} />
@@ -181,7 +181,7 @@ export function ConversationTranscriptPage() {
       
 
       {/* Bottom bar */}
-      <div className="flex items-center shrink-0 pt-3.5 pb-3.5 gap-4 bg-white border-t border-[#F0EEE9] px-6">
+      <div className="flex items-center shrink-0 pt-3.5 pb-5 gap-4 bg-white border-t border-[#F0EEE9] px-6">
         <div className="grow flex flex-col gap-0.5">
           <div className="flex items-center gap-1.5">
             {isActive ? <WaveIndicator /> : <div className="w-2 h-2 rounded-full bg-[#A8A29E]" />}

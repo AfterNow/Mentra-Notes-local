@@ -94,6 +94,7 @@ export function SearchPage() {
   const [loadingKey, setLoadingKey] = useState(0);
   const [recentSearches, setRecentSearches] = useState<string[]>(getRecentSearches);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchAbortRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const transcriptionPaused = session?.settings?.transcriptionPaused ?? false;
@@ -106,26 +107,41 @@ export function SearchPage() {
       return;
     }
 
+    // Abort any in-flight search
+    searchAbortRef.current?.abort();
+    const abortController = new AbortController();
+    searchAbortRef.current = abortController;
+
     setIsSearching(true);
     setHasSearched(true);
     setLoadingKey((k) => k + 1);
 
-    const minDelay = new Promise((r) => setTimeout(r, 1500));
+    const minDelay = new Promise((r) => setTimeout(r, 2000));
 
     try {
       const userParam = userId ? `&userId=${encodeURIComponent(userId)}` : "";
-      const fetchPromise = fetch(`/api/search?q=${encodeURIComponent(q.trim())}&limit=10${userParam}`, { credentials: "include" })
-        .then((r) => r.json());
+      const fetchPromise = fetch(
+        `/api/search?q=${encodeURIComponent(q.trim())}&limit=10${userParam}`,
+        { credentials: "include", signal: abortController.signal },
+      ).then((r) => r.json());
 
       const [data] = await Promise.all([fetchPromise, minDelay]);
-      setResults(data.results || []);
-    } catch {
+      // Only apply results if this search wasn't aborted
+      if (!abortController.signal.aborted) {
+        setResults(data.results || []);
+      }
+    } catch (err: any) {
+      if (err?.name === "AbortError") return; // Aborted by newer search, do nothing
       await minDelay;
-      setResults([]);
+      if (!abortController.signal.aborted) {
+        setResults([]);
+      }
     } finally {
-      saveRecentSearch(q.trim());
-      setRecentSearches(getRecentSearches());
-      setIsSearching(false);
+      if (!abortController.signal.aborted) {
+        saveRecentSearch(q.trim());
+        setRecentSearches(getRecentSearches());
+        setIsSearching(false);
+      }
     }
   }, [userId]);
 

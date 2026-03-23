@@ -32,9 +32,8 @@ import { FABMenu } from "./components/FABMenu";
 import { TranscriptList } from "./components/TranscriptList";
 import { Drawer } from "vaul";
 import { HomePageSkeleton } from "../../components/shared/SkeletonLoader";
-import { LoadingState } from "../../components/shared/LoadingState";
 import { SelectionHeader } from "../../components/shared/SelectionHeader";
-import { MultiSelectBar, type MultiSelectAction, ExportIcon, FavoriteIcon, DeleteIcon } from "../../components/shared/MultiSelectBar";
+import { MultiSelectBar, type MultiSelectAction, ExportIcon, MergeIcon, FavoriteIcon, DeleteIcon } from "../../components/shared/MultiSelectBar";
 import { ExportDrawer, type ExportOptions } from "../../components/shared/ExportDrawer";
 import { EmailDrawer } from "../../components/shared/EmailDrawer";
 
@@ -56,8 +55,6 @@ export function HomePage() {
   const [convShowFilter, setConvShowFilter] = useState<ShowFilter>("all");
   const [convCustomStart, setConvCustomStart] = useState<string | undefined>();
   const [convCustomEnd, setConvCustomEnd] = useState<string | undefined>();
-  const [filterLoading, setFilterLoading] = useState(false);
-  const filterLoadingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialTab =
     new URLSearchParams(search).get("tab") === "transcripts"
       ? "transcripts"
@@ -94,6 +91,10 @@ export function HomePage() {
   const pendingTranscriptDatesRef = useRef<string[]>([]);
   const [showTranscriptDeleteConfirm, setShowTranscriptDeleteConfirm] = useState(false);
   const [transcriptDeleteWarning, setTranscriptDeleteWarning] = useState("");
+  const [showMergeDrawer, setShowMergeDrawer] = useState(false);
+  const [mergeTrashOriginals, setMergeTrashOriginals] = useState(true);
+  const [isMerging, setIsMerging] = useState(false);
+  const [mergedHighlightId, setMergedHighlightId] = useState<string | null>(null);
 
   // Derive data from session
   const files = session?.file?.files ?? [];
@@ -290,14 +291,6 @@ export function HomePage() {
     return conversations.filter((c) => c.isTrashed).length;
   }, [conversations]);
 
-  const pendingFilterRef = useRef<{
-    sortBy: SortBy;
-    dateRange: DateRange;
-    showFilter: ShowFilter;
-    customStart?: string;
-    customEnd?: string;
-  } | null>(null);
-
   const handleFilterApply = useCallback(
     ({
       sortBy,
@@ -313,41 +306,14 @@ export function HomePage() {
       customEnd?: string;
     }) => {
       setIsFilterOpen(false);
-
-      // Store pending filter, show spinner first
-      pendingFilterRef.current = {
-        sortBy,
-        dateRange,
-        showFilter,
-        customStart,
-        customEnd,
-      };
-      setFilterLoading(true);
-
-      if (filterLoadingRef.current) clearTimeout(filterLoadingRef.current);
-      filterLoadingRef.current = setTimeout(() => {
-        // Apply the actual filter changes after spinner
-        const pending = pendingFilterRef.current;
-        if (pending) {
-          setConvSortBy(pending.sortBy);
-          setConvDateRange(pending.dateRange);
-          setConvShowFilter(pending.showFilter);
-          setConvCustomStart(pending.customStart);
-          setConvCustomEnd(pending.customEnd);
-          pendingFilterRef.current = null;
-        }
-        setFilterLoading(false);
-      }, 1000);
+      setConvSortBy(sortBy);
+      setConvDateRange(dateRange);
+      setConvShowFilter(showFilter);
+      setConvCustomStart(customStart);
+      setConvCustomEnd(customEnd);
     },
     [],
   );
-
-  // Cleanup timer on unmount
-  useEffect(() => {
-    return () => {
-      if (filterLoadingRef.current) clearTimeout(filterLoadingRef.current);
-    };
-  }, []);
 
   const handleArchiveConversation = useCallback(
     async (conversation: Conversation) => {
@@ -562,16 +528,36 @@ export function HomePage() {
     convSelect.cancel();
   }, [filteredConversations, convSelect, notes, pendingConvExportOptions]);
 
+  const handleMergeConfirm = useCallback(async () => {
+    if (!session?.conversation) return;
+    setIsMerging(true);
+    try {
+      const ids = [...convSelect.selectedIds];
+      const newId = await session.conversation.mergeConversations(ids, mergeTrashOriginals);
+      setShowMergeDrawer(false);
+      convSelect.cancel();
+      // Highlight the new merged conversation for 4 seconds
+      setMergedHighlightId(newId);
+      setTimeout(() => setMergedHighlightId(null), 4000);
+    } catch (err) {
+      console.error("[HomePage] Merge failed:", err);
+    } finally {
+      setIsMerging(false);
+    }
+  }, [session, convSelect, mergeTrashOriginals]);
+
   const convSelectActions = useMemo((): MultiSelectAction[] => {
+    const canMerge = convShowFilter !== "trash" && convSelect.count >= 2 && convSelect.count <= 10;
     const actions: MultiSelectAction[] = [
       { icon: <ExportIcon />, label: "Export", onClick: () => setShowConvExportDrawer(true) },
+      { icon: <MergeIcon />, label: "Merge", onClick: () => setShowMergeDrawer(true), disabled: !canMerge },
       { icon: <FavoriteIcon />, label: "Favorite", onClick: handleConvBatchFavourite },
     ];
     if (convShowFilter !== "trash") {
       actions.push({ icon: <DeleteIcon />, label: "Trash", onClick: handleConvBatchTrash, variant: "danger" });
     }
     return actions;
-  }, [handleConvBatchFavourite, handleConvBatchTrash, convShowFilter]);
+  }, [handleConvBatchFavourite, handleConvBatchTrash, convShowFilter, convSelect.count]);
 
   const convExportLabel = useMemo(() => {
     if (convSelect.count === 1) {
@@ -1003,12 +989,6 @@ export function HomePage() {
             <button
               onClick={() => {
                 setConvShowFilter("all");
-                setFilterLoading(true);
-                if (filterLoadingRef.current)
-                  clearTimeout(filterLoadingRef.current);
-                filterLoadingRef.current = setTimeout(() => {
-                  setFilterLoading(false);
-                }, 3000);
               }}
               className="flex items-center rounded-[20px] py-[7px] px-4 shrink-0 bg-[#1C1917]"
             >
@@ -1072,9 +1052,8 @@ export function HomePage() {
                 longPressProps={transcriptSelect.longPressProps}
               />
             </div>
-          ) : filterLoading ? (
+          ) : !isConversationsHydrated ? (
             <div className="flex flex-col items-center justify-center h-full">
-              <LoadingState size={100} cycleMessages />
             </div>
           ) : hasNoConversations ? (
             <div className="flex flex-col items-center justify-center h-full px-10 gap-4">
@@ -1217,6 +1196,8 @@ export function HomePage() {
                 selectedIds={convSelect.selectedIds}
                 onToggleSelect={(id) => convSelect.toggleItem(id)}
                 longPressProps={convSelect.longPressProps}
+                highlightId={mergedHighlightId}
+                onHighlightSeen={(id) => { if (mergedHighlightId === id) setMergedHighlightId(null); }}
               />
             </>
           )}
@@ -1278,6 +1259,100 @@ export function HomePage() {
         defaultEmail={userId || ""}
         itemLabel={transcriptSelect.count === 1 ? "Transcript" : `${transcriptSelect.count} Transcripts`}
       />
+
+      {/* Merge Conversations Drawer */}
+      <Drawer.Root open={showMergeDrawer} onOpenChange={(open) => !open && setShowMergeDrawer(false)}>
+        <Drawer.Portal>
+          <Drawer.Overlay className="fixed inset-0 bg-black/30 backdrop-blur-[6px] z-50" />
+          <Drawer.Content className="flex flex-col rounded-t-[20px] fixed bottom-0 left-0 right-0 z-50 bg-[#FAFAF9] outline-none">
+            <div className="flex justify-center pt-3 pb-4">
+              <div className="w-9 h-1 rounded-xs bg-[#D6D3D1] shrink-0" />
+            </div>
+            <Drawer.Title className="sr-only">Merge Conversations</Drawer.Title>
+            <Drawer.Description className="sr-only">Merge selected conversations into one</Drawer.Description>
+            <div className="px-6 pb-10">
+              <div className="flex items-center justify-between pb-1">
+                <span className="text-xl leading-[26px] text-[#1C1917] font-red-hat font-extrabold tracking-[-0.02em]">
+                  Merge {convSelect.count} Conversations?
+                </span>
+                <button onClick={() => setShowMergeDrawer(false)}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <line x1="18" y1="6" x2="6" y2="18" stroke="#78716C" strokeWidth="2" strokeLinecap="round" />
+                    <line x1="6" y1="6" x2="18" y2="18" stroke="#78716C" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                </button>
+              </div>
+              <p className="text-[14px] leading-5 text-[#78716C] font-red-hat pb-4">
+                This will combine the transcripts from {convSelect.count} conversations into a single new conversation with a fresh AI summary.
+              </p>
+
+              {/* Conversation titles being merged */}
+              <div className="flex flex-col gap-1.5 pb-4 max-h-32 overflow-y-auto">
+                {filteredConversations
+                  .filter((c) => convSelect.selectedIds.has(c.id))
+                  .map((c) => (
+                    <div key={c.id} className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-[#D6D3D1] shrink-0" />
+                      <span className="text-[13px] leading-4 text-[#1C1917] font-red-hat font-medium truncate">
+                        {c.title || "Untitled"}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+
+              {/* Trash originals checkbox */}
+              <button
+                onClick={() => setMergeTrashOriginals(!mergeTrashOriginals)}
+                className="flex items-center gap-2.5 py-3 w-full"
+              >
+                <div className={`w-5 h-5 rounded border-[1.5px] flex items-center justify-center transition-colors ${
+                  mergeTrashOriginals ? "bg-[#1C1917] border-[#1C1917]" : "border-[#D6D3D1]"
+                }`}>
+                  {mergeTrashOriginals && (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                      <polyline points="20 6 9 17 4 12" stroke="#FAFAF9" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
+                </div>
+                <span className="text-[14px] leading-5 text-[#1C1917] font-red-hat font-medium">
+                  Move originals to trash after merge
+                </span>
+              </button>
+
+              {/* Merge button */}
+              <button
+                onClick={handleMergeConfirm}
+                disabled={isMerging}
+                className="flex items-center justify-center w-full mt-4 rounded-xl bg-[#1C1917] p-3.5 disabled:opacity-50"
+              >
+                {isMerging ? (
+                  <span className="flex items-center gap-2 text-[16px] leading-5 text-[#FAFAF9] font-red-hat font-bold">
+                    <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none">
+                      <circle cx="12" cy="12" r="10" stroke="#FAFAF9" strokeWidth="3" opacity="0.3" />
+                      <path d="M12 2a10 10 0 0 1 10 10" stroke="#FAFAF9" strokeWidth="3" strokeLinecap="round" />
+                    </svg>
+                    Merging...
+                  </span>
+                ) : (
+                  <span className="text-[16px] leading-5 text-[#FAFAF9] font-red-hat font-bold">
+                    Merge Conversations
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={() => setShowMergeDrawer(false)}
+                disabled={isMerging}
+                className="flex items-center justify-center w-full mt-3 rounded-xl border border-[#E7E5E4] p-3.5 disabled:opacity-50"
+              >
+                <span className="text-[16px] leading-5 text-[#1C1917] font-red-hat font-bold">
+                  Cancel
+                </span>
+              </button>
+            </div>
+            <div className="h-safe-area-bottom" />
+          </Drawer.Content>
+        </Drawer.Portal>
+      </Drawer.Root>
 
       {/* Transcript Delete Confirmation */}
       <Drawer.Root open={showTranscriptDeleteConfirm} onOpenChange={(open) => !open && setShowTranscriptDeleteConfirm(false)}>

@@ -26,6 +26,10 @@ interface ConversationListProps {
     onTouchEnd: () => void;
     onTouchMove: () => void;
   };
+  /** ID of a conversation to highlight (e.g. after merge) */
+  highlightId?: string | null;
+  /** Called when user clicks on the highlighted conversation */
+  onHighlightSeen?: (id: string) => void;
 }
 
 interface DayGroup {
@@ -46,6 +50,8 @@ export function ConversationList({
   selectedIds,
   onToggleSelect,
   longPressProps,
+  highlightId,
+  onHighlightSeen,
 }: ConversationListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -175,7 +181,7 @@ export function ConversationList({
                 >
                   <ConversationRow
                     conversation={conv}
-                    onSelect={onSelectConversation}
+                    onSelect={(c) => { onSelectConversation(c); if (highlightId === c.id) onHighlightSeen?.(c.id); }}
                     onArchive={onArchive}
                     onDelete={onDelete}
                     isLast={i === group.conversations.length - 1}
@@ -183,6 +189,7 @@ export function ConversationList({
                     isSelected={selectedIds?.has(conv.id) ?? false}
                     onToggleSelect={() => onToggleSelect?.(conv.id)}
                     longPressHandlers={longPressProps?.(conv.id, conv.status !== "ended")}
+                    isHighlighted={highlightId === conv.id}
                   />
                 </motion.div>
               );

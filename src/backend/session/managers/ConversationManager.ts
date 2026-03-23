@@ -9,7 +9,7 @@
  */
 
 import { SyncedManager, synced, rpc } from "../../../lib/sync";
-import { getAllConversations, deleteConversation, updateConversation } from "../../models/conversation.model";
+import { getAllConversations, deleteConversation, updateConversation, createConversation } from "../../models/conversation.model";
 import { getChunksByConversationId, getChunksByTimeRange } from "../../models/transcript-chunk.model";
 import { getDailyTranscript } from "../../models";
 import type { ConversationI } from "../../models/conversation.model";
@@ -365,10 +365,16 @@ export class ConversationManager extends SyncedManager {
     });
 
     try {
-      // Fetch ALL chunks in the conversation's time range (not just linked ones),
-      // so filler/skipped segments between meaningful ones are included in the summary transcript.
-      const endTime = conv.endTime ?? new Date();
-      const chunks = await getChunksByTimeRange(conv.userId, conv.startTime, endTime);
+      // For merged conversations (many chunkIds spanning multiple time ranges),
+      // use chunkIds directly. For normal conversations, use time range to include filler chunks.
+      let chunks: TranscriptChunkI[];
+      if (conv.chunkIds.length > 0) {
+        const { TranscriptChunk } = await import("../../models/transcript-chunk.model");
+        chunks = await TranscriptChunk.find({ _id: { $in: conv.chunkIds } }).sort({ startTime: 1 });
+      } else {
+        const endTime = conv.endTime ?? new Date();
+        chunks = await getChunksByTimeRange(conv.userId, conv.startTime, endTime);
+      }
       if (chunks.length === 0) {
         console.warn(`[ConvManager] No chunks for conversation ${convId}, skipping summary`);
         await updateConversation(convId, { generatingSummary: false });
@@ -389,12 +395,17 @@ export class ConversationManager extends SyncedManager {
         })
         .join("\n\n");
 
+      const isMerged = conv.chunkIds.length > 0 && chunks.length > 5;
+      const mergeNote = isMerged
+        ? "\nNote: This is a merged conversation combining multiple discussions. The title should capture the overall theme across all topics discussed, not just one subtopic.\n"
+        : "";
+
       const prompt = `Summarize this conversation. Respond with EXACTLY this format:
 
 TITLE: <max 5 words>
 
 <2-3 sentences max. Key points and decisions only. Be extremely concise.>
-
+${mergeNote}
 Transcript:
 ---
 ${transcript}
@@ -694,6 +705,107 @@ ${transcript}
       parts.push(`# ${conv.title || "Untitled Conversation"}\n${conv.aiSummary || conv.runningSummary || "No summary available"}`);
     }
     return parts.join("\n\n---\n\n");
+  }
+
+  @rpc
+  async mergeConversations(conversationIds: string[], trashOriginals: boolean): Promise<string> {
+    if (conversationIds.length < 2) throw new Error("Need at least 2 conversations to merge");
+    if (conversationIds.length > 10) throw new Error("Cannot merge more than 10 conversations at once");
+
+    const userId = this._session?.userId;
+    if (!userId) throw new Error("No user session");
+
+    console.log(`[ConvManager] Merging ${conversationIds.length} conversations for ${userId}`);
+
+    // 1. Load and validate all source conversations from DB
+    const { default: mongoose } = await import("mongoose");
+    const ConversationModel = mongoose.model("Conversation");
+    const sourceConvs: ConversationI[] = [];
+    for (const id of conversationIds) {
+      const conv = await ConversationModel.findById(id) as ConversationI | null;
+      if (!conv) throw new Error(`Conversation ${id} not found`);
+      if (conv.status !== "ended") throw new Error(`Conversation ${id} is not ended (status: ${conv.status})`);
+      sourceConvs.push(conv);
+    }
+
+    // 2. Sort source conversations by startTime (chronological)
+    sourceConvs.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+
+    // 3. Collect all chunk IDs from source conversations' stored arrays (not DB query,
+    // because previous merges may have reassigned chunk conversationId)
+    const allChunkIds: string[] = [];
+    const seenChunkIds = new Set<string>();
+    for (const conv of sourceConvs) {
+      for (const chunkId of conv.chunkIds) {
+        const id = chunkId.toString();
+        if (!seenChunkIds.has(id)) {
+          seenChunkIds.add(id);
+          allChunkIds.push(id);
+        }
+      }
+    }
+
+    // 4. Determine merged conversation date/time range
+    // startTime/endTime span the full range (needed for AI summary to find chunks)
+    // For list positioning: we store the actual range but set startTime slightly after
+    // the latest source so it appears right after it in the descending sort
+    const earliestConv = sourceConvs[0];
+    const latestConv = sourceConvs[sourceConvs.length - 1];
+    const mergedDate = latestConv.date;
+    const actualStartTime = earliestConv.startTime;
+    const actualEndTime = latestConv.endTime ?? new Date();
+    // 5. Create the merged conversation with actual time range (for chunk queries)
+    const mergedConv = await createConversation({
+      userId,
+      date: mergedDate,
+      startTime: actualStartTime,
+    });
+    const mergedId = mergedConv._id!.toString();
+
+    // 6. Update merged conversation with full data
+    await updateConversation(mergedId, {
+      status: "ended",
+      endTime: actualEndTime,
+      chunkIds: allChunkIds,
+      runningSummary: "",
+      noteId: null,
+      silenceCount: 0,
+    } as any);
+
+    // 7. Reassign all chunks to the merged conversation
+    const { TranscriptChunk } = await import("../../models/transcript-chunk.model");
+    await TranscriptChunk.updateMany(
+      { _id: { $in: allChunkIds } },
+      { $set: { conversationId: mergedId } },
+    );
+
+    console.log(`[ConvManager] Merged conversation ${mergedId} created with ${allChunkIds.length} chunks`);
+
+    // 8. Add merged conversation to frontend state FIRST (so AI summary sync can find it)
+    const initialFrontendConv = await this.toFrontendConversation(
+      (await ConversationModel.findById(mergedId)) as ConversationI,
+      { skipSegments: true },
+    );
+    this.conversations.mutate((list) => {
+      list.unshift(initialFrontendConv);
+    });
+
+    // 9. Generate AI summary + title (syncs to frontend via mutate internally)
+    const freshConv = await ConversationModel.findById(mergedId) as ConversationI;
+    if (freshConv) {
+      await this.generateAISummary(freshConv);
+    }
+
+    // 10. If trashOriginals, trash source conversations
+    if (trashOriginals) {
+      for (const conv of sourceConvs) {
+        await this.trashConversation(conv._id!.toString());
+      }
+    }
+
+    const finalTitle = (await ConversationModel.findById(mergedId) as ConversationI)?.title || "Merged Conversation";
+    console.log(`[ConvManager] Merge complete: "${finalTitle}" — ${mergedId} (${allChunkIds.length} chunks, ${sourceConvs.length} sources${trashOriginals ? ", originals trashed" : ""})`);
+    return mergedId;
   }
 
   // =========================================================================

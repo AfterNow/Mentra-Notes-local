@@ -10,7 +10,7 @@ import { useLocation } from "wouter";
 import { useMentraAuth } from "@mentra/react";
 import { useSynced } from "../../hooks/useSynced";
 import type { SessionI } from "../../../shared/types";
-import { useTheme } from "../../App";
+// import { useTheme } from "../../App"; // Dark mode disabled
 import { SettingsPageSkeleton } from "../../components/shared/SkeletonLoader";
 
 // ── Toggle Switch (matches ExportDrawer style) ──
@@ -55,7 +55,7 @@ export function SettingsPage() {
   const [, setLocation] = useLocation();
   const { userId } = useMentraAuth();
   const { session, isConnected } = useSynced<SessionI>(userId || "");
-  const { isDarkMode, toggleTheme } = useTheme();
+  // const { isDarkMode, toggleTheme } = useTheme(); // Dark mode disabled
 
   // Profile photo state
   const [photoError, setPhotoError] = useState(false);
@@ -159,14 +159,15 @@ export function SettingsPage() {
           </div>
 
           {/* ── Preferences ── */}
+          {/* Dark mode disabled — always light mode
           <SectionHeader label="Preferences" />
-
           <div className="flex items-center justify-between py-3.5 border-b border-[#E7E5E4]">
             <span className="text-[15px] leading-5 text-[#1C1917] font-red-hat font-medium">
               Dark Mode
             </span>
             <ToggleSwitch checked={isDarkMode} onChange={toggleTheme} />
           </div>
+          */}
 
           {/* ── Onboarding ── */}
           <SectionHeader label="Onboarding" />

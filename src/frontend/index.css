@@ -65,6 +65,18 @@
   animation: note-shake 0.3s ease-in-out infinite;
 }
 
+/* Merge highlight — subtle red pulse that fades out */
+@keyframes merge-highlight {
+  0% { background-color: transparent; }
+  15% { background-color: #FEE2E24D; }
+  85% { background-color: #FEE2E24D; }
+  100% { background-color: transparent; }
+}
+
+.animate-merge-highlight {
+  animation: merge-highlight 4s ease-in-out forwards;
+}
+
 /* Masonry grid - ensure items fill column width */
 [data-masonry] > div {
   width: 100% !important;

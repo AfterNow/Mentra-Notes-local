@@ -289,6 +289,7 @@ export interface ConversationManagerI {
   batchFavouriteConversations(ids: string[]): Promise<void>;
   batchTrashConversations(ids: string[]): Promise<void>;
   exportConversationsAsText(ids: string[]): Promise<string>;
+  mergeConversations(conversationIds: string[], trashOriginals: boolean): Promise<string>;
 }
 
 export interface FileManagerI {

@@ -3,10 +3,10 @@
  *
  * Behavior:
  * - On mount: scrolls to bottom instantly
- * - New content (DOM mutations): auto-scrolls to bottom if enabled
- * - User touches screen and scrolls UP: disables auto-scroll, shows button
- * - User taps "scroll to bottom" button: re-enables auto-scroll, scrolls down
- * - Auto-scroll ONLY re-enables via the button — never from scroll position
+ * - New content (DOM child additions): auto-scrolls to bottom if locked
+ * - User scrolls up (away from bottom): unlocks auto-scroll, shows button
+ * - User scrolls back near bottom (within 200px): re-locks auto-scroll
+ * - Button tap: re-locks and scrolls to bottom
  *
  * Returns:
  * - scrollContainerRef: attach to the scrollable container element
@@ -33,66 +33,61 @@ export function useAutoScroll(options: UseAutoScrollOptions = {}): UseAutoScroll
   const { deps = [], disableAutoScroll = false } = options;
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
-  const autoScrollRef = useRef(true);
-  const isTouchingRef = useRef(false);
+  const lockedRef = useRef(true);
+  const initialDone = useRef(false);
+
+  // Initial scroll to bottom (once per deps change)
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    if (initialDone.current) return;
+    initialDone.current = true;
+    lockedRef.current = true;
+    setShowScrollButton(false);
+    container.scrollTo({ top: container.scrollHeight, behavior: "instant" });
+  }, deps);
+
+  // Reset initial flag when deps change
+  useEffect(() => {
+    initialDone.current = false;
+  }, deps);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
 
-    // Reset state on re-init
-    autoScrollRef.current = true;
-    setShowScrollButton(false);
-
-    let scrollAtTouchStart = 0;
-
-    const handleTouchStart = () => {
-      isTouchingRef.current = true;
-      scrollAtTouchStart = container.scrollTop;
+    const isNearBottom = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      return scrollHeight - scrollTop - clientHeight < 200;
     };
 
-    const handleTouchEnd = () => {
-      isTouchingRef.current = false;
-    };
-
+    // Detect scroll position — works for touch, mouse, keyboard
     const handleScroll = () => {
-      if (!isTouchingRef.current) return;
-      // User scrolled up from where they started touching — unlock
-      if (container.scrollTop < scrollAtTouchStart) {
-        autoScrollRef.current = false;
-        setShowScrollButton(true);
+      if (isNearBottom()) {
+        lockedRef.current = true;
+        setShowScrollButton(false);
       } else {
-        // User scrolled back to bottom — re-lock
-        const { scrollTop, scrollHeight, clientHeight } = container;
-        if (scrollHeight - scrollTop - clientHeight < 50) {
-          autoScrollRef.current = true;
-          setShowScrollButton(false);
-        }
+        lockedRef.current = false;
+        setShowScrollButton(true);
       }
     };
 
-    container.addEventListener("touchstart", handleTouchStart, { passive: true });
-    container.addEventListener("touchend", handleTouchEnd, { passive: true });
-    container.addEventListener("scroll", handleScroll, { passive: true });
-
-    // Auto-scroll on new content (DOM mutations) only if enabled
+    // Auto-scroll on new child elements only when locked
+    // No characterData — avoids interim text causing scroll jank
     let observer: MutationObserver | null = null;
     if (!disableAutoScroll) {
       observer = new MutationObserver(() => {
-        if (!autoScrollRef.current) return;
+        if (!lockedRef.current) return;
         requestAnimationFrame(() => {
           container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
         });
       });
-      observer.observe(container, { childList: true, subtree: true, characterData: true });
+      observer.observe(container, { childList: true, subtree: true });
     }
 
-    // Initial scroll to bottom
-    container.scrollTo({ top: container.scrollHeight, behavior: "instant" });
+    container.addEventListener("scroll", handleScroll, { passive: true });
 
     return () => {
-      container.removeEventListener("touchstart", handleTouchStart);
-      container.removeEventListener("touchend", handleTouchEnd);
       container.removeEventListener("scroll", handleScroll);
       observer?.disconnect();
     };
@@ -101,7 +96,7 @@ export function useAutoScroll(options: UseAutoScrollOptions = {}): UseAutoScroll
   const scrollToBottom = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
-    autoScrollRef.current = true;
+    lockedRef.current = true;
     setShowScrollButton(false);
     container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
   }, []);

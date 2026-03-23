@@ -463,45 +463,44 @@ export function TranscriptTab({
   const isLive = currentHour !== undefined;
   const [showScrollButton, setShowScrollButton] = useState(false);
   const lockedRef = useRef(true);
-  const touchingRef = useRef(false);
+  // Initial scroll to bottom on first load only
+  const initialScrollDone = useRef(false);
+  useEffect(() => {
+    if (isLoading || initialScrollDone.current) return;
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    initialScrollDone.current = true;
+    lockedRef.current = true;
+    container.scrollTo({ top: container.scrollHeight, behavior: "instant" });
+  }, [isLoading]);
+
+  // Reset initial scroll flag when date changes
+  useEffect(() => {
+    initialScrollDone.current = false;
+  }, [dateString]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
 
-    lockedRef.current = true;
-    setShowScrollButton(false);
-
     const isNearBottom = () => {
       const { scrollTop, scrollHeight, clientHeight } = container;
-      return scrollHeight - scrollTop - clientHeight < 100;
+      return scrollHeight - scrollTop - clientHeight < 200;
     };
 
-    let scrollAtTouchStart = 0;
-
-    const handleTouchStart = () => {
-      touchingRef.current = true;
-      scrollAtTouchStart = container.scrollTop;
-    };
-    const handleTouchEnd = () => {
-      touchingRef.current = false;
-    };
-
+    // Detect scroll position to lock/unlock — works for both touch and mouse
     const handleScroll = () => {
-      if (!touchingRef.current) return;
-      // User scrolled up → unlock immediately
-      if (container.scrollTop < scrollAtTouchStart) {
-        lockedRef.current = false;
-        setShowScrollButton(true);
-      }
-      // User scrolled back to bottom → re-lock
       if (isNearBottom()) {
         lockedRef.current = true;
         setShowScrollButton(false);
+      } else {
+        lockedRef.current = false;
+        setShowScrollButton(true);
       }
     };
 
-    // Auto-scroll on new content only when locked
+    // Auto-scroll on new child elements only when locked
+    // Removed characterData to avoid interim text causing scroll jank
     const observer = new MutationObserver(() => {
       if (!lockedRef.current) return;
       requestAnimationFrame(() => {
@@ -509,16 +508,10 @@ export function TranscriptTab({
       });
     });
 
-    container.addEventListener("touchstart", handleTouchStart, { passive: true });
-    container.addEventListener("touchend", handleTouchEnd, { passive: true });
     container.addEventListener("scroll", handleScroll, { passive: true });
-    observer.observe(container, { childList: true, subtree: true, characterData: true });
-
-    container.scrollTo({ top: container.scrollHeight, behavior: "instant" });
+    observer.observe(container, { childList: true, subtree: true });
 
     return () => {
-      container.removeEventListener("touchstart", handleTouchStart);
-      container.removeEventListener("touchend", handleTouchEnd);
       container.removeEventListener("scroll", handleScroll);
       observer.disconnect();
     };
@@ -575,7 +568,7 @@ export function TranscriptTab({
   return (
     <div className="h-full relative">
     <div ref={scrollContainerRef} className="h-full overflow-y-auto">
-      <div className="pb-6 pt-1">
+      <div className="pb-20 pt-1">
         {sortedHours.map((hourKey) => {
           const hourSegments = groupedSegments[hourKey];
           const { hour24, label: hourLabel } = parseHourKey(hourKey);

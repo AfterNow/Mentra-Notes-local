@@ -35,6 +35,8 @@ interface ConversationRowProps {
     onTouchEnd: () => void;
     onTouchMove: () => void;
   };
+  /** Highlight this row (e.g. after merge) */
+  isHighlighted?: boolean;
 }
 
 function getDurationMinutes(conversation: Conversation): number | null {
@@ -54,6 +56,7 @@ export const ConversationRow = memo(function ConversationRow({
   isSelected = false,
   onToggleSelect,
   longPressHandlers,
+  isHighlighted = false,
 }: ConversationRowProps) {
   const isActive = conversation.status === "active" || conversation.status === "paused";
   const canSelect = !isActive; // Active/paused conversations can't be selected
@@ -142,7 +145,7 @@ export const ConversationRow = memo(function ConversationRow({
         style={isSelecting ? undefined : { x }}
         onClick={rowClick}
         className={`flex items-center py-3.5 relative z-10 select-none ${
-          isSelected ? "bg-[#FEE2E24D] px-6 -mx-6" : "bg-[#FAFAF9]"
+          isHighlighted ? "animate-merge-highlight px-6 -mx-6" : isSelected ? "bg-[#FEE2E24D] px-6 -mx-6" : "bg-[#FAFAF9]"
         } ${!isLast ? (isActive ? "border-b border-b-[#FEE2E2]" : "border-b border-b-[#F5F5F4]") : ""}`}
       >
         {/* Checkbox — no layout shift, uses opacity */}
