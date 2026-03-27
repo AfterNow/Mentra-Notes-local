@@ -204,7 +204,7 @@ export function SearchPage() {
           <div className={`text-[11px] leading-3.5 tracking-widest uppercase text-[#DC2626] font-red-hat font-bold`}>
             Mentra Notes
           </div>
-          <div className={`flex items-center gap-1 h-full px-1 rounded ${isMicActive ? 'bg-[#FEF2F2]' : 'bg-[#F5F5F4]'}`}>
+          {/* <div className={`flex items-center gap-1 h-full px-1 rounded ${isMicActive ? 'bg-[#FEF2F2]' : 'bg-[#F5F5F4]'}`}>
             <div className={`shrink-0 rounded-full size-1.75 ${isMicActive ? 'bg-[#DC2626] animate-pulse' : 'bg-[#A8A29E]'}`} />
             {isMicActive ? (
               <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -222,7 +222,7 @@ export function SearchPage() {
                 <line x1="8" y1="23" x2="16" y2="23" />
               </svg>
             )}
-          </div>
+          </div> */}
         </div>
         <div className={`text-[28px] leading-[34px] text-[#1C1917] font-red-hat font-extrabold font-black`}>
           Search

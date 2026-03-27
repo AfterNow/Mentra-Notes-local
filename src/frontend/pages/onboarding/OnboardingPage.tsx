@@ -32,6 +32,7 @@ import { TutorialOrganize } from "./components/TutorialOrganize";
 import { TutorialSwipe } from "./components/TutorialSwipe";
 import { TutorialComplete } from "./components/TutorialComplete";
 import { OnboardingFooter } from "./components/OnboardingFooter";
+import { SkipDialog } from "./components/SkipDialog";
 import { SplashScreen } from "../../components/shared/SplashScreen";
 
 /** Onboarding form data collected across steps */
@@ -42,6 +43,47 @@ export interface OnboardingData {
   priorities: Set<string>;
   contacts: string[];
   topics: string[];
+}
+
+const STORAGE_KEY = "onboarding-progress";
+
+/** Persist onboarding step + form data to localStorage */
+function saveProgress(step: number, data: OnboardingData) {
+  try {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        step,
+        data: { ...data, priorities: Array.from(data.priorities) },
+      })
+    );
+  } catch {}
+}
+
+/** Restore onboarding progress from localStorage */
+function loadProgress(): { step: number; data: OnboardingData } | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return {
+      step: parsed.step ?? 0,
+      data: {
+        name: parsed.data?.name ?? "",
+        role: parsed.data?.role ?? "",
+        company: parsed.data?.company ?? "",
+        priorities: new Set(parsed.data?.priorities ?? ["decisions", "summaries"]),
+        contacts: parsed.data?.contacts ?? [],
+        topics: parsed.data?.topics ?? [],
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+function clearProgress() {
+  localStorage.removeItem(STORAGE_KEY);
 }
 
 const TOTAL_STEPS = 9;
@@ -59,9 +101,11 @@ const STEP_NAMES = [
 ];
 
 export function OnboardingPage() {
-  const [step, setStep] = useState(0);
+  const saved = useRef(loadProgress());
+  const [step, setStep] = useState(saved.current?.step ?? 0);
   const [direction, setDirection] = useState(1);
   const [showSplash, setShowSplash] = useState(false);
+  const [showSkipDialog, setShowSkipDialog] = useState(false);
   const [, navigate] = useLocation();
 
   // Synced session for saving onboarding data
@@ -69,14 +113,16 @@ export function OnboardingPage() {
   const { session } = useSynced<SessionI>(userId || "");
 
   // Lifted onboarding form state
-  const [onboardingData, setOnboardingData] = useState<OnboardingData>({
-    name: "",
-    role: "",
-    company: "",
-    priorities: new Set(["decisions", "summaries"]),
-    contacts: [],
-    topics: [],
-  });
+  const [onboardingData, setOnboardingData] = useState<OnboardingData>(
+    saved.current?.data ?? {
+      name: "",
+      role: "",
+      company: "",
+      priorities: new Set(["decisions", "summaries"]),
+      contacts: [],
+      topics: [],
+    }
+  );
 
   const updateOnboardingData = useCallback((partial: Partial<OnboardingData>) => {
     setOnboardingData((prev) => ({ ...prev, ...partial }));
@@ -100,6 +146,11 @@ export function OnboardingPage() {
     }
   }, [session, onboardingData]);
 
+  // Persist onboarding progress to localStorage on every step/data change
+  useEffect(() => {
+    saveProgress(step, onboardingData);
+  }, [step, onboardingData]);
+
   // Track onboarding started on mount
   useEffect(() => {
     trackOnboardingStarted();
@@ -110,6 +161,7 @@ export function OnboardingPage() {
   useEffect(() => {
     if (!showSplash || hasSaved.current) return;
     hasSaved.current = true;
+    clearProgress();
     saveOnboardingData();
     const timer = setTimeout(() => {
       sessionStorage.setItem("onboarding-complete-splash", "1");
@@ -212,16 +264,37 @@ export function OnboardingPage() {
         </AnimatePresence>
       </div>
 
-      {/* Persistent footer — stays outside animation */}
-      {!isWelcome && (
-        <OnboardingFooter
-          activeIndex={dotIndex}
-          totalDots={totalDots}
-          buttonLabel={buttonLabel}
-          onAction={onAction}
-          onBack={step > 0 ? back : undefined}
-        />
-      )}
+      {/* Footer — fades in after welcome, absolute so it doesn't shift welcome layout */}
+      <AnimatePresence>
+        {!isWelcome && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className="absolute bottom-0 left-0 right-0 bg-[#FAFAF9] dark:bg-black"
+          >
+            <OnboardingFooter
+              activeIndex={dotIndex}
+              totalDots={totalDots}
+              buttonLabel={buttonLabel}
+              onAction={onAction}
+              onBack={step > 0 ? back : undefined}
+              onSkip={() => setShowSkipDialog(true)}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Skip confirmation dialog */}
+      <SkipDialog
+        open={showSkipDialog}
+        onContinue={() => setShowSkipDialog(false)}
+        onSkip={() => {
+          setShowSkipDialog(false);
+          finish();
+        }}
+      />
 
       {/* Post-onboarding splash — navigate while still covering, then fade */}
       <SplashScreen

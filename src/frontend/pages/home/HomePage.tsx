@@ -803,7 +803,7 @@ export function HomePage() {
           >
             Mentra Notes
           </div>
-          <div
+          {/* <div
             className={`flex items-center gap-1 h-full px-1 rounded ${isMicActive ? "bg-[#FEF2F2]" : "bg-[#F5F5F4]"}`}
           >
             <div
@@ -843,7 +843,7 @@ export function HomePage() {
                 <line x1="8" y1="23" x2="16" y2="23" />
               </svg>
             )}
-          </div>
+          </div> */}
         </div>
         <div className="flex items-end justify-between">
           <div className="flex flex-col gap-0.5">

@@ -10,6 +10,7 @@ interface OnboardingFooterProps {
   buttonLabel: string;
   onAction: () => void;
   onBack?: () => void;
+  onSkip?: () => void;
 }
 
 export function OnboardingFooter({
@@ -18,9 +19,16 @@ export function OnboardingFooter({
   buttonLabel,
   onAction,
   onBack,
+  onSkip,
 }: OnboardingFooterProps) {
   return (
     <div className="flex items-center justify-between w-full pb-10 px-6">
+      <button
+        onClick={onSkip}
+        className="px-5 py-2 rounded-full border border-[#D6D3D1] dark:border-zinc-700 text-[14px] font-['Red_Hat_Display',system-ui,sans-serif] font-semibold text-[#1C1917] dark:text-white active:scale-95 transition-transform"
+      >
+        Skip
+      </button>
       <div className="flex items-center gap-1.5">
         {Array.from({ length: totalDots }).map((_, i) => (
           <motion.div
