@@ -5,14 +5,18 @@
  * Supports both mobile and desktop views.
  */
 
-import { useState, useEffect, createContext, useContext } from "react";
+import { useState, useEffect, useRef, createContext, useContext } from "react";
 import { motion } from "framer-motion";
+import { useLocation } from "wouter";
 import { useMentraAuth } from "@mentra/react";
 import { Toaster } from "sonner";
 import { clsx } from "clsx";
 import { Router } from "./router";
 import { Shell } from "./components/layout/Shell";
-// import { SplashScreen } from "./components/shared/SplashScreen";
+import { useFeatureFlag, FLAGS } from "./services/posthog";
+import { SplashScreen } from "./components/shared/SplashScreen";
+import { useSynced } from "./hooks/useSynced";
+import type { SessionI } from "../shared/types";
 
 // =============================================================================
 // Theme Context
@@ -39,23 +43,40 @@ export function useTheme() {
 // =============================================================================
 
 export function App() {
-  const { isLoading, error } = useMentraAuth();
+  const { isLoading, error, userId } = useMentraAuth();
+  const [, navigate] = useLocation();
+  const { session } = useSynced<SessionI>(userId || "");
 
-  // // Splash screen: show for 3s, then fade out
-  // const [splashVisible, setSplashVisible] = useState(true);
-  // useEffect(() => {
-  //   const timer = setTimeout(() => setSplashVisible(false), 3000);
-  //   return () => clearTimeout(timer);
-  // }, []);
-
-  // Theme state
-  const [theme, setTheme] = useState<"light" | "dark">(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("theme");
-      if (saved === "dark" || saved === "light") return saved;
+  // Redirect to onboarding on app open (controlled by feature flag + onboardingCompleted)
+  const { enabled: showOnboarding, loaded: flagsLoaded } = useFeatureFlag(FLAGS.FRONTEND_ONBOARD, false);
+  const [onboardingResolved, setOnboardingResolved] = useState(false);
+  const onboardingResolvedRef = useRef(false);
+  useEffect(() => {
+    // Once resolved, never re-check (prevents re-trigger on reconnect)
+    if (onboardingResolvedRef.current) return;
+    if (!flagsLoaded) return;
+    if (session?.settings?.onboardingCompleted === undefined) return;
+    const alreadyCompleted = session.settings.onboardingCompleted === true;
+    if (showOnboarding && !alreadyCompleted) {
+      navigate("/onboarding");
     }
-    return "light";
+    onboardingResolvedRef.current = true;
+    setOnboardingResolved(true);
+  }, [showOnboarding, flagsLoaded, session?.settings?.onboardingCompleted]);
+
+  // Post-onboarding transition splash — survives the route change from /onboarding → /
+  const [postOnboardingSplash, setPostOnboardingSplash] = useState(false);
+  useEffect(() => {
+    const flag = sessionStorage.getItem("onboarding-complete-splash");
+    if (flag) {
+      sessionStorage.removeItem("onboarding-complete-splash");
+      setPostOnboardingSplash(true);
+    }
   });
+
+
+  // Theme state — forced to light mode (dark mode disabled)
+  const [theme, setTheme] = useState<"light" | "dark">("light");
 
   // Toggle Theme Function
   const toggleTheme = () => {
@@ -119,6 +140,15 @@ export function App() {
     toggleTheme,
   };
 
+  // Don't render app until onboarding check resolves — show splash instead
+  if (!onboardingResolved) {
+    return (
+      <div className={clsx(theme)}>
+        <SplashScreen visible message="Loading" />
+      </div>
+    );
+  }
+
   return (
     <ThemeContext.Provider value={themeValue}>
       <div
@@ -131,7 +161,12 @@ export function App() {
         <Shell>
           <Router />
         </Shell>
-        {/* <SplashScreen visible={splashVisible} /> */}
+        <SplashScreen
+          visible={postOnboardingSplash}
+          message="Getting you set up"
+          duration={1200}
+          onDone={() => setPostOnboardingSplash(false)}
+        />
       </div>
     </ThemeContext.Provider>
   );

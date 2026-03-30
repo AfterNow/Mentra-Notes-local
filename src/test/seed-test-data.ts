@@ -13,7 +13,7 @@ import { MongoClient } from "mongodb";
 // Configuration
 // =============================================================================
 
-const TEST_USER_ID = "aryan.mentra.dev.public@gmail.com";
+const TEST_USER_ID = process.env.TEST_USER_ID || "test@example.com";
 
 const MONGODB_URI = process.env.MONGODB_URI!;
 const R2_ENDPOINT = process.env.CLOUDFLARE_R2_ENDPOINT!;
@@ -26,11 +26,14 @@ const R2_SECRET_KEY = process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY!;
 // =============================================================================
 
 function getToday(): string {
-  return "2026-02-03"; // Hardcoded for testing
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function getYesterday(): string {
-  return "2026-02-03"; // Hardcoded for testing
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 // =============================================================================

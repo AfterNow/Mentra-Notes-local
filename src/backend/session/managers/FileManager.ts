@@ -14,10 +14,12 @@ import {
   incrementNoteCount,
   updateFileTranscript,
   getAvailableDates,
+  getTranscriptSummaries,
   deleteFile as deleteFileFromDb,
   deleteDailyTranscript,
   deleteNotesByDate,
   deleteChatHistory,
+  HourSummary,
   type FileI,
 } from "../../models";
 import { deleteFromR2 } from "../../services/r2Upload.service";
@@ -32,6 +34,7 @@ export interface FileData {
   date: string;
   noteCount: number;
   transcriptSegmentCount: number;
+  transcriptHourCount: number;
   hasTranscript: boolean;
   hasNotes: boolean;
   isArchived: boolean;
@@ -99,11 +102,9 @@ export class FileManager extends SyncedManager {
     console.log(`[FileManager] Starting hydration for ${userId}`);
 
     try {
-      // Step 1: Load existing File records from MongoDB
-      const dbFiles = await getFiles(userId, {
-        isTrashed: false,
-        isArchived: false,
-      });
+      // Step 1: Load ALL existing File records from MongoDB (including archived/trashed)
+      // We need all dates to avoid recreating archived files as "missing"
+      const dbFiles = await getFiles(userId);
       const existingDates = new Set(dbFiles.map((f) => f.date));
       console.log(`[FileManager] Found ${dbFiles.length} existing File records in MongoDB`);
       console.log(`[FileManager] Existing File dates:`, Array.from(existingDates));
@@ -159,18 +160,39 @@ export class FileManager extends SyncedManager {
         console.log(`[FileManager] Creating ${missingDates.length} new File records...`);
         await bulkCreateFiles(userId, missingDates);
 
-        // Mark R2 dates as having transcripts
+        // Mark dates as having transcripts (no R2 fetch — just set r2Key)
         for (const date of missingDates) {
           if (r2Dates.includes(date)) {
-            console.log(`[FileManager] Marking ${date} as R2 transcript`);
             await updateFileTranscript(userId, date, {
               r2Key: `transcripts/${userId}/${date}.json`,
             });
           } else if (mongoDbDates.includes(date)) {
-            console.log(`[FileManager] Marking ${date} as MongoDB transcript`);
             await updateFileTranscript(userId, date, {});
           }
         }
+
+      }
+
+      // Step 5b: Update existing File records that are in R2 but missing r2Key or incorrectly archived
+      const existingNeedingUpdate = dbFiles.filter(
+        (f) => r2Dates.includes(f.date) && (!f.r2Key || f.isArchived)
+      );
+      if (existingNeedingUpdate.length > 0) {
+        console.log(`[FileManager] Updating ${existingNeedingUpdate.length} existing files (r2Key/unarchive):`, existingNeedingUpdate.map(f => f.date));
+        const { File: FileModel } = await import("../../models/file.model");
+        await Promise.all(
+          existingNeedingUpdate.map(async (f) => {
+            const updates: Record<string, unknown> = {
+              hasTranscript: true,
+              r2Key: `transcripts/${userId}/${f.date}.json`,
+            };
+            // Unarchive files that were archived by the old file-level archive
+            if (f.isArchived) {
+              updates.isArchived = false;
+            }
+            await FileModel.updateOne({ userId, date: f.date }, { $set: updates });
+          })
+        );
       }
 
       // Step 6: Clean up orphaned File records (no transcript data and no notes)
@@ -201,19 +223,96 @@ export class FileManager extends SyncedManager {
         this._lastKnownToday = today;
       }
 
-      // Load files based on current activeFilter
+      // Backfill segment counts from MongoDB summaries (fast, no R2 fetches)
+      {
+        const summaries = await getTranscriptSummaries(userId);
+        if (summaries.length > 0) {
+          const summaryMap = new Map(summaries.map((s) => [s.date, s.segmentCount]));
+          const fixes: Promise<void>[] = [];
+          for (const [date, count] of summaryMap) {
+            if (count > 0) {
+              fixes.push(updateFileTranscript(userId, date, { segmentCount: count }).catch(() => {}));
+            }
+          }
+          if (fixes.length > 0) await Promise.all(fixes);
+        }
+      }
+
+      // Now load files — they should have correct counts from the backfill
       const files = await this.getFilesRpc(this.activeFilter);
+      console.log(`[FileManager] Pre-set segment counts:`, files.slice(0, 10).map(f => `${f.date}=${f.transcriptSegmentCount}`).join(", "));
       this.files.set(files);
+
+      // Sync today's segment count from TranscriptManager (today's count is in-memory)
+      const transcriptManager = (this._session as any)?.transcript;
+      if (transcriptManager?.segments?.length > 0) {
+        this.files.mutate((list) => {
+          const idx = list.findIndex((f) => f.date === today);
+          if (idx >= 0) {
+            list[idx].transcriptSegmentCount = transcriptManager.segments.length;
+          }
+        });
+      }
 
       // Update counts
       await this.refreshCounts();
 
       console.log(`[FileManager] ✓ Hydration complete: ${files.length} files for ${userId} (filter: ${this.activeFilter})`);
-      console.log(`[FileManager] Final files:`, files.map(f => ({ date: f.date, hasTranscript: f.hasTranscript, r2Key: f.r2Key, noteCount: f.noteCount })));
+
+      // Background: fix segment counts for R2 files that show 0 (non-blocking)
+      const zeroCountR2Files = files.filter((f) => f.transcriptSegmentCount === 0 && f.hasTranscript && f.r2Key);
+      if (zeroCountR2Files.length > 0) {
+        console.log(`[FileManager] Background: fixing ${zeroCountR2Files.length} R2 segment counts`);
+        this.backfillR2SegmentCounts(userId, zeroCountR2Files.map((f) => f.date));
+      }
     } catch (error) {
       console.error("[FileManager] Failed to hydrate:", error);
     } finally {
       this.isLoading = false;
+    }
+  }
+
+  /**
+   * Background task: fetch segment counts from R2 and persist to File records.
+   * Runs after hydration, non-blocking. Updates synced state when done.
+   */
+  private async backfillR2SegmentCounts(userId: string, dates: string[]): Promise<void> {
+    const r2Manager = (this._session as any)?.r2;
+    if (!r2Manager) return;
+
+    const BATCH = 3;
+    let updated = 0;
+
+    for (let i = 0; i < dates.length; i += BATCH) {
+      const batch = dates.slice(i, i + BATCH);
+      const results = await Promise.allSettled(
+        batch.map(async (date) => {
+          try {
+            const r2Data = await r2Manager.fetchTranscript(date);
+            const count = r2Data?.segments?.length || 0;
+            if (count > 0) {
+              await updateFileTranscript(userId, date, { segmentCount: count });
+              return { date, count };
+            }
+          } catch {}
+          return null;
+        })
+      );
+
+      for (const result of results) {
+        if (result.status === "fulfilled" && result.value) {
+          const { date, count } = result.value;
+          this.files.mutate((list) => {
+            const idx = list.findIndex((f) => f.date === date);
+            if (idx >= 0) list[idx].transcriptSegmentCount = count;
+          });
+          updated++;
+        }
+      }
+    }
+
+    if (updated > 0) {
+      console.log(`[FileManager] Background: fixed ${updated}/${dates.length} segment counts`);
     }
   }
 
@@ -246,12 +345,13 @@ export class FileManager extends SyncedManager {
     return this.getTimeManager().today();
   }
 
-  private toFileData(file: FileI): FileData {
+  private toFileData(file: FileI, hourCount?: number): FileData {
     return {
       id: file._id?.toString() || file.date,
       date: file.date,
       noteCount: file.noteCount,
       transcriptSegmentCount: file.transcriptSegmentCount,
+      transcriptHourCount: hourCount ?? 0,
       hasTranscript: file.hasTranscript,
       hasNotes: file.hasNotes,
       isArchived: file.isArchived,
@@ -399,6 +499,19 @@ export class FileManager extends SyncedManager {
   }
 
   /**
+   * Called by TranscriptManager when a new segment is added.
+   * Updates the in-memory count so the UI shows the correct number for today.
+   */
+  onSegmentAdded(date: string, totalSegments: number): void {
+    this.files.mutate((files) => {
+      const idx = files.findIndex((f) => f.date === date);
+      if (idx >= 0) {
+        files[idx].transcriptSegmentCount = totalSegments;
+      }
+    });
+  }
+
+  /**
    * Called by R2Manager after batch upload
    */
   async onTranscriptArchived(
@@ -444,6 +557,12 @@ export class FileManager extends SyncedManager {
   }
 
   // ===========================================================================
+  destroy(): void {
+    this._operationInProgress = null;
+    this._timeManager = null;
+    this._lastKnownToday = null;
+  }
+
   // RPC Methods
   // ===========================================================================
 
@@ -492,7 +611,16 @@ export class FileManager extends SyncedManager {
     }
 
     const files = await getFiles(userId, filterOptions);
-    return files.map((f) => this.toFileData(f));
+
+    // Batch query distinct hour counts per date from HourSummary
+    const dates = files.map((f) => f.date);
+    const hourCounts = await HourSummary.aggregate<{ _id: string; count: number }>([
+      { $match: { userId, date: { $in: dates } } },
+      { $group: { _id: "$date", count: { $sum: 1 } } },
+    ]);
+    const hourCountMap = new Map(hourCounts.map((h) => [h._id, h.count]));
+
+    return files.map((f) => this.toFileData(f, hourCountMap.get(f.date)));
   }
 
   @rpc
@@ -613,15 +741,31 @@ export class FileManager extends SyncedManager {
     });
 
     try {
-      // Mutually exclusive: clear favourite and archive when trashing
+      // Delete transcript data permanently (R2 + MongoDB)
+      const currentFile = this.files.find((f) => f.date === date);
+      if (currentFile?.r2Key) {
+        const r2Result = await deleteFromR2({ userId, date });
+        if (!r2Result.success) {
+          console.warn(`[FileManager] Failed to delete R2 for ${date}:`, r2Result.error);
+        } else {
+          console.log(`[FileManager] Deleted R2 transcript for ${date}`);
+        }
+      }
+      await deleteDailyTranscript(userId, date);
+      console.log(`[FileManager] Deleted MongoDB transcript for ${date}`);
+
+      // Mark file as trashed (clear favourite/archive)
       const file = await updateFile(userId, date, {
         isTrashed: true,
         isFavourite: false,
         isArchived: false,
-      });
+        hasTranscript: false,
+        r2Key: undefined,
+        transcriptSegmentCount: 0,
+      } as any);
       if (!file) return null;
 
-      console.log(`[FileManager] Trashed file ${date}, refreshing list (filter: ${this.activeFilter})`);
+      console.log(`[FileManager] Trashed file ${date}, transcript data deleted`);
 
       // Refresh the list based on current filter
       const files = await this.getFilesRpc(this.activeFilter);

@@ -4,25 +4,42 @@
  * Defines all routes for the Notes app using Wouter.
  * Routes:
  * - / → HomePage (folder list)
- * - /day/:date → DayPage (day detail with tabs)
+ * - /onboarding → OnboardingPage (multi-step onboarding flow)
  * - /note/:id → NotePage (individual note view/editor)
+ * - /search → SearchPage (semantic search)
  * - /settings → SettingsPage
  */
 
 import { Route, Switch, useLocation } from "wouter";
 import { AnimatePresence, motion } from "framer-motion";
 import { HomePage } from "./pages/home/HomePage";
-import { DayPage } from "./pages/day/DayPage";
+import { OnboardingPage } from "./pages/onboarding/OnboardingPage";
 import { NotePage } from "./pages/note/NotePage";
+import { SearchPage } from "./pages/search/SearchPage";
 import { SettingsPage } from "./pages/settings/SettingsPage";
+import { ConversationDetailPage } from "./pages/conversation/ConversationDetailPage";
+import { ConversationTranscriptPage } from "./pages/conversation/ConversationTranscriptPage";
+import { GeneratingNotePage } from "./pages/conversation/GeneratingNotePage";
+import { NotesPage } from "./pages/notes/NotesPage";
+import { CollectionsPage } from "./pages/notes/CollectionsPage";
+import { FolderPage } from "./pages/notes/FolderPage";
+import { TranscriptPage } from "./pages/transcript/TranscriptPage";
 
 /** Renders routes frozen to a specific location so exit animations show the old page */
 function FrozenRoutes({ location }: { location: string }) {
   return (
     <Switch location={location}>
       <Route path="/" component={HomePage} />
-      <Route path="/day/:date" component={DayPage} />
+      <Route path="/onboarding" component={OnboardingPage} />
+      <Route path="/transcript/:date" component={TranscriptPage} />
       <Route path="/note/:id" component={NotePage} />
+      <Route path="/conversation/:id" component={ConversationDetailPage} />
+      <Route path="/conversation/:id/transcript" component={ConversationTranscriptPage} />
+      <Route path="/conversation/:id/generating" component={GeneratingNotePage} />
+      <Route path="/notes" component={NotesPage} />
+      <Route path="/collections" component={CollectionsPage} />
+      <Route path="/folder/:id" component={FolderPage} />
+      <Route path="/search" component={SearchPage} />
       <Route path="/settings" component={SettingsPage} />
       <Route>
         <HomePage />

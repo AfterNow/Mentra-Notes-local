@@ -1,0 +1,131 @@
+{
+  "description": "Semantic search eval cases. Each case has a query and expected results that should appear in the top results.",
+  "cases": [
+    {
+      "query": "how did we fix the API performance issues",
+      "category": "technical-recall",
+      "expectedTitles": ["Performance optimization results"],
+      "expectedTypes": ["note"],
+      "note": "Should find the note about connection pooling and query optimization"
+    },
+    {
+      "query": "what's the plan for dinner this week",
+      "category": "personal-recall",
+      "expectedTitles": ["Grocery list and meal prep ideas"],
+      "expectedTypes": ["note"],
+      "note": "Should find the meal prep note with Mediterranean diet"
+    },
+    {
+      "query": "Stripe payment webhook issues",
+      "category": "technical-recall",
+      "expectedTitles": ["Debugging the payment webhook"],
+      "expectedTypes": ["conversation"],
+      "note": "Should find the conversation about Stripe webhook failures"
+    },
+    {
+      "query": "when is my next doctor visit",
+      "category": "personal-recall",
+      "expectedTitles": ["Doctor appointment follow-up"],
+      "expectedTypes": ["note"],
+      "note": "Should find the doctor appointment note"
+    },
+    {
+      "query": "sprint priorities and auth migration",
+      "category": "work-recall",
+      "expectedTitles": ["Team standup - Sprint 14 kickoff"],
+      "expectedTypes": ["note"],
+      "note": "Should find Sprint 14 kickoff note about auth migration"
+    },
+    {
+      "query": "kubernetes upgrade plan",
+      "category": "technical-recall",
+      "expectedTitles": ["Kubernetes cluster migration notes"],
+      "expectedTypes": ["note"],
+      "note": "Should find EKS upgrade notes"
+    },
+    {
+      "query": "caching and cache invalidation",
+      "category": "technical-recall",
+      "expectedTitles": ["Code review feedback session"],
+      "expectedTypes": ["conversation"],
+      "note": "Should find the code review conversation about caching layer"
+    },
+    {
+      "query": "half marathon training schedule",
+      "category": "personal-recall",
+      "expectedTitles": ["Running training plan discussion"],
+      "expectedTypes": ["conversation"],
+      "note": "Should find the running training conversation"
+    },
+    {
+      "query": "camping trip hiking plans",
+      "category": "personal-recall",
+      "expectedTitles": ["Weekend trip planning - Big Sur"],
+      "expectedTypes": ["note"],
+      "note": "Should find the Big Sur trip note"
+    },
+    {
+      "query": "promotion timeline and career growth",
+      "category": "work-recall",
+      "expectedTitles": ["1:1 with manager - Career growth discussion"],
+      "expectedTypes": ["note"],
+      "note": "Should find the 1:1 career discussion note"
+    },
+    {
+      "query": "event sourcing architecture decision",
+      "category": "technical-recall",
+      "expectedTitles": ["Architecture review: Event sourcing proposal"],
+      "expectedTypes": ["note"],
+      "note": "Should find the event sourcing architecture note"
+    },
+    {
+      "query": "database replication and consistency",
+      "category": "technical-recall",
+      "expectedTitles": ["Reading notes: Designing Data-Intensive Applications"],
+      "expectedTypes": ["note"],
+      "note": "Should find the DDIA reading notes about replication"
+    },
+    {
+      "query": "what book are we reading next month",
+      "category": "personal-recall",
+      "expectedTitles": ["Book club discussion - Project Hail Mary"],
+      "expectedTypes": ["note"],
+      "note": "Should find the book club note mentioning next month's pick"
+    },
+    {
+      "query": "team building activities and offsite",
+      "category": "work-recall",
+      "expectedTitles": ["Planning the team offsite"],
+      "expectedTypes": ["conversation"],
+      "note": "Should find the team offsite planning conversation"
+    },
+    {
+      "query": "mobile login bug users can't sign in",
+      "category": "technical-recall",
+      "expectedTitles": ["Bug report: Login timeout on mobile"],
+      "expectedTypes": ["note"],
+      "note": "Should find the mobile login timeout bug report"
+    },
+    {
+      "query": "machine learning recommendations NLP",
+      "category": "technical-recall",
+      "expectedTitles": ["Coffee chat about machine learning"],
+      "expectedTypes": ["conversation"],
+      "note": "Should find the ML coffee chat conversation"
+    },
+    {
+      "query": "rent negotiation apartment",
+      "category": "personal-recall",
+      "expectedTitles": ["Apartment lease renewal discussion"],
+      "expectedTypes": ["conversation"],
+      "note": "Should find the lease renewal conversation"
+    },
+    {
+      "query": "homemade Italian cooking",
+      "category": "personal-recall",
+      "expectedTitles": ["Recipe: Homemade pasta from scratch"],
+      "expectedTypes": ["note"],
+      "note": "Should find the pasta recipe note"
+    }
+  ]
+}

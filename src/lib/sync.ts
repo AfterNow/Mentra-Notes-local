@@ -343,6 +343,9 @@ export abstract class SyncedManager {
   /** Called when session persists - override to save to DB */
   async persist(): Promise<void> {}
 
+  /** Called when session is disposed - override to stop timers/intervals */
+  destroy(): void {}
+
   /** Get list of synced field names */
   getSyncedFields(): string[] {
     return getSyncedFields(this.constructor);
@@ -712,9 +715,12 @@ export abstract class SyncedSession {
   // Lifecycle
   // ===========================================================================
 
-  /** Dispose session */
+  /** Dispose session — persist first, then destroy all managers */
   async dispose(): Promise<void> {
     await this.persist();
+    for (const mgr of this._managers.values()) {
+      mgr.destroy();
+    }
     this._clients.clear();
   }
 }
@@ -748,7 +754,8 @@ export class SessionManager<T extends SyncedSession = SyncedSession> {
       session = this._factory(userId);
       this._sessions.set(userId, session);
       await session.hydrate();
-      console.log(`[SessionManager] Created session for ${userId}`);
+      const memMB = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
+      console.log(`[SessionManager] Created session for ${userId} (heap: ${memMB}MB, sessions: ${this._sessions.size})`);
     }
 
     return session;
@@ -765,7 +772,8 @@ export class SessionManager<T extends SyncedSession = SyncedSession> {
     if (session) {
       await session.dispose();
       this._sessions.delete(userId);
-      console.log(`[SessionManager] Removed session for ${userId}`);
+      const memMB = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
+      console.log(`[SessionManager] Removed session for ${userId} (heap: ${memMB}MB, sessions: ${this._sessions.size})`);
     }
   }
 

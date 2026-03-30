@@ -37,7 +37,21 @@ export {
   deleteNote,
   getNotesByDateRange,
   deleteNotesByDate,
+  unassignNotesFromFolder,
+  deleteTrashedNotes,
 } from "./note.model";
+
+// Folder
+export {
+  Folder,
+  type FolderI,
+  type FolderColor,
+  createFolder,
+  getFolders,
+  updateFolder,
+  deleteFolder,
+  seedDefaultFolders,
+} from "./folder.model";
 
 // User Settings
 export {
@@ -61,6 +75,35 @@ export {
   deleteChatHistory,
   getChatHistoryDates,
 } from "./chat-history.model";
+
+// Conversation (auto-notes pipeline)
+export {
+  Conversation,
+  type ConversationI,
+  type ConversationStatus,
+  createConversation,
+  getResumableConversations,
+  getConversationsByDate,
+  getAllConversations,
+  getConversationById,
+  updateConversation,
+  appendChunkToConversation,
+  getActiveConversations,
+} from "./conversation.model";
+
+// Transcript Chunk (auto-notes pipeline)
+export {
+  TranscriptChunk,
+  type TranscriptChunkI,
+  type ChunkClassification,
+  createTranscriptChunk,
+  getNextChunkIndex,
+  getRecentChunks,
+  updateChunkClassification,
+  getChunksByConversationId,
+  deleteOldChunks,
+  getChunksByDate,
+} from "./transcript-chunk.model";
 
 // File (source of truth for folders)
 export {

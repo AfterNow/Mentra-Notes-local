@@ -26,9 +26,11 @@ export async function connectDB(): Promise<void> {
   try {
     await mongoose.connect(uri, {
       dbName: "notes",
+      tlsAllowInvalidCertificates: true,
+      tlsAllowInvalidHostnames: true,
     });
     isConnected = true;
-    console.log("[DB] Connected to MongoDB");
+    console.log("[DB] ✅ Connected to MongoDB");
   } catch (error) {
     console.error("[DB] Connection failed:", error);
     throw error;

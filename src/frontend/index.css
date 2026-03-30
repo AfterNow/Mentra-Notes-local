@@ -1,6 +1,12 @@
 @import "tailwindcss";
 @import "./styles/sega.css";
 
+
+@theme {
+  --font-sans: "Red Hat Display", ui-sans-serif, system-ui, sans-serif;
+  --font-red-hat: "Red Hat Display", ui-sans-serif, system-ui, sans-serif;
+}
+
 /* Splash screen hand-drawn stroke style */
 .splash-stroke {
   fill: none;
@@ -8,6 +14,12 @@
   stroke-linecap: round;
   stroke-linejoin: round;
   opacity: 0;
+}
+
+/* Wave bar animation for "Transcribing now" badge */
+@keyframes wave {
+  from { transform: scaleY(0.4); opacity: 0.7; }
+  to   { transform: scaleY(1);   opacity: 1;   }
 }
 
 /* Shimmer animation for transcribing indicator */
@@ -38,6 +50,31 @@
 
 .animate-segment-in {
   animation: segment-fade-in 0.3s ease-out forwards;
+}
+
+
+
+/* Shake animation for note selection mode */
+@keyframes note-shake {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-0.4deg); }
+  75% { transform: rotate(0.4deg); }
+}
+
+.animate-note-shake {
+  animation: note-shake 0.3s ease-in-out infinite;
+}
+
+/* Merge highlight — subtle red pulse that fades out */
+@keyframes merge-highlight {
+  0% { background-color: transparent; }
+  15% { background-color: #FEE2E24D; }
+  85% { background-color: #FEE2E24D; }
+  100% { background-color: transparent; }
+}
+
+.animate-merge-highlight {
+  animation: merge-highlight 4s ease-in-out forwards;
 }
 
 /* Masonry grid - ensure items fill column width */

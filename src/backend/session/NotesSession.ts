@@ -12,12 +12,16 @@
 import { SyncedSession, SessionManager, manager } from "../../lib/sync";
 import {
   TranscriptManager,
+  SummaryManager,
   NotesManager,
   ChatManager,
   SettingsManager,
   CloudflareR2Manager,
   FileManager,
   PhotoManager,
+  ChunkBufferManager,
+  ConversationManager,
+  FoldersManager,
 } from "./managers";
 import { InputManager } from "./managers/InputManager";
 import { createUserState } from "../services/userState.service";
@@ -29,15 +33,20 @@ export class NotesSession extends SyncedSession {
   // IMPORTANT: settings must hydrate first — other managers read settings.timezone
   @manager settings = new SettingsManager();
   @manager transcript = new TranscriptManager();
+  @manager summary = new SummaryManager();
   @manager notes = new NotesManager();
   @manager chat = new ChatManager();
   @manager r2 = new CloudflareR2Manager();
   @manager file = new FileManager();
   @manager photo = new PhotoManager();
   @manager input = new InputManager();
+  @manager chunkBuffer = new ChunkBufferManager();
+  @manager conversation = new ConversationManager();
+  @manager folders = new FoldersManager();
 
   // MentraOS AppSession - null if no glasses connected (not synced)
   private _appSession: AppSession | null = null;
+  private _pipelineWired = false;
 
   // ===========================================================================
   // Client Connection - Refresh FileManager on connect
@@ -49,9 +58,19 @@ export class NotesSession extends SyncedSession {
    */
   addClient(ws: any): void {
     super.addClient(ws);
-    // Note: FileManager is hydrated once during session creation.
-    // We no longer re-hydrate on every client connect to avoid
-    // race conditions with user filter selections.
+
+    // Wire auto-notes pipeline on first client connect (after all managers hydrated)
+    if (!this._pipelineWired) {
+      this._pipelineWired = true;
+      this.conversation.wireChunkBuffer(this.chunkBuffer);
+
+      // When TranscriptManager force-finalizes interim text, feed it into ChunkBuffer
+      this.transcript.onForceFinalize((text) => {
+        this.chunkBuffer.addText(text);
+      });
+
+      console.log(`[NotesSession] Auto-notes pipeline wired for ${this.userId}`);
+    }
   }
 
   // ===========================================================================
@@ -124,6 +143,7 @@ export class NotesSession extends SyncedSession {
 
     // Reset recording state since glasses are disconnected
     this.transcript.stopRecording();
+    this.chunkBuffer.stop();
 
     console.log(
       `[NotesSession] Glasses disconnected for ${this.userId} - headless mode`,
@@ -140,8 +160,22 @@ export class NotesSession extends SyncedSession {
    * Handle incoming transcription from glasses
    */
   onTranscription(text: string, isFinal: boolean, speakerId?: string): void {
+    // Drop everything if user has stopped transcription
+    if (this.settings.transcriptionPaused) {
+      if (isFinal) console.log(`[NotesSession] Transcription paused — dropping segment for ${this.userId}: "${text.slice(0, 60)}"`);
+      return;
+    }
+
     // Add to transcript
     this.transcript.addSegment(text, isFinal, speakerId);
+
+    // Track speaking state — interim results mean user is mid-sentence
+    this.chunkBuffer.markSpeaking(!isFinal);
+
+    // Feed final segments into the auto-notes chunk buffer
+    if (isFinal && text.trim()) {
+      this.chunkBuffer.addText(text);
+    }
 
     // Show on glasses display based on display mode
     if (this._appSession) {
@@ -155,12 +189,9 @@ export class NotesSession extends SyncedSession {
 
   /**
    * Clean up resources when session is disposed
+   * Base class handles persist() then destroy() on all managers automatically
    */
   async dispose(): Promise<void> {
-    // Clean up transcript manager timers
-    this.transcript.destroy();
-
-    // Call parent dispose (persists data, clears clients)
     await super.dispose();
   }
 
@@ -187,7 +218,7 @@ export class NotesSession extends SyncedSession {
       case "hour_summary":
         // Show the rolling hour summary instead of raw text
         // Only update on final segments to avoid flickering
-        const summary = this.transcript.getCurrentHourSummary();
+        const summary = this.summary.getCurrentHourSummary();
         this._appSession.dashboard.content.write(`📝 ${summary}`);
         break;
 

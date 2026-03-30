@@ -12,12 +12,14 @@ import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { sessions } from "../session";
 import {
   getOrCreateDailyTranscript,
+  getDailyTranscript,
   Note as NoteModel,
   UserSettings,
   File as FileModel,
   getFiles,
   updateFile,
 } from "../models";
+import { rewriteR2Urls } from "../../shared/constants";
 
 // Environment
 const API_KEY = process.env.MENTRAOS_API_KEY || "";
@@ -37,18 +39,10 @@ const authMiddleware = createAuthMiddleware({
 });
 
 /**
- * Get userId from auth context or header
+ * Get userId from auth context
  */
 function getUserId(c: any): string | null {
-  // Try auth context first (from middleware)
-  const authUserId = c.get("userId");
-  if (authUserId) return authUserId;
-
-  // Fallback to header
-  const headerUserId = c.req.header("x-user-id");
-  if (headerUserId) return headerUserId;
-
-  return null;
+  return c.get("authUserId") || c.get("userId") || null;
 }
 
 /**
@@ -76,6 +70,33 @@ function requireSession(c: any) {
   return { userId, session };
 }
 
+/** Derive base URL from the incoming request headers */
+function getBaseUrl(c: any): string {
+  const origin = c.req.header("origin");
+  if (origin) return origin;
+
+  const host = c.req.header("host");
+  const proto = c.req.header("x-forwarded-proto") || "https";
+  if (host) return `${proto}://${host}`;
+
+  return process.env.BASE_URL || "https://localhost:3000";
+}
+
+/** Strip dangerous HTML patterns from email content */
+function sanitizeEmailHtml(html: string): string {
+  return html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/\s+on\w+\s*=\s*["'][^"']*["']/gi, "")
+    .replace(/\s+on\w+\s*=\s*[^\s>]+/gi, "")
+    .replace(/href\s*=\s*["']javascript:[^"']*["']/gi, 'href="#"')
+    .replace(/src\s*=\s*["']javascript:[^"']*["']/gi, 'src=""')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<iframe[^>]*>[\s\S]*?<\/iframe>/gi, "")
+    .replace(/<form[^>]*>[\s\S]*?<\/form>/gi, "")
+    .replace(/<input[^>]*\/?>/gi, "")
+    .replace(/<button[^>]*>[\s\S]*?<\/button>/gi, "");
+}
+
 // =============================================================================
 // Health Check
 // =============================================================================
@@ -85,6 +106,83 @@ api.get("/health", (c) => {
     status: "ok",
     timestamp: new Date().toISOString(),
     activeSessions: sessions.getActiveUserIds().length,
+  });
+});
+
+// =============================================================================
+// Auto-Notes Pipeline Test (DEV ONLY)
+// =============================================================================
+
+/**
+ * Simulate transcript input to test the auto-notes pipeline.
+ * Injects fake transcript segments into a user's session as if glasses were speaking.
+ *
+ * Usage:
+ *   # Single segment:
+ *   curl -X POST http://localhost:3000/api/test/simulate-transcript \
+ *     -H "Content-Type: application/json" \
+ *     -d '{"userId":"test@example.com","text":"We need to move the deadline to next Friday and notify all stakeholders."}'
+ *
+ *   # Full conversation (multiple segments injected rapidly):
+ *   curl -X POST http://localhost:3000/api/test/simulate-conversation \
+ *     -H "Content-Type: application/json" \
+ *     -d '{"userId":"test@example.com"}'
+ */
+api.post("/test/simulate-transcript", async (c) => {
+  const { userId, text } = await c.req.json();
+  if (!userId || !text) {
+    return c.json({ error: "userId and text required" }, 400);
+  }
+
+  const session = sessions.get(userId);
+  if (!session) {
+    return c.json({ error: `No active session for ${userId}. Connect via WebSocket first.` }, 404);
+  }
+
+  // Simulate a final transcript segment
+  session.onTranscription(text, true);
+
+  return c.json({
+    success: true,
+    message: `Injected segment into ${userId}'s session`,
+    chunkBufferRunning: session.chunkBuffer.isRunning,
+  });
+});
+
+api.post("/test/simulate-conversation", async (c) => {
+  const { userId } = await c.req.json();
+  if (!userId) {
+    return c.json({ error: "userId required" }, 400);
+  }
+
+  const session = sessions.get(userId);
+  if (!session) {
+    return c.json({ error: `No active session for ${userId}. Connect via WebSocket first.` }, 404);
+  }
+
+  // A realistic multi-turn conversation about a project deadline
+  const segments = [
+    "So I wanted to talk about the Q2 launch timeline. We're currently targeting March 28th for the beta release.",
+    "Right, but the design team just told me they need another week on the onboarding flow. The current mockups aren't tested yet.",
+    "That's a problem. If we push the beta by a week, that puts us right up against the investor demo on April 8th.",
+    "What if we launch the beta without the new onboarding? We can use the existing flow and swap it out in a patch.",
+    "I think that works. Let's do it. Sarah can keep working on onboarding in parallel, and we'll ship it as a day-one patch.",
+    "Agreed. So the plan is: beta on March 28th with existing onboarding, new onboarding patch by April 3rd, investor demo April 8th.",
+    "Perfect. I'll update the project board and send a Slack summary to the team. Can you loop in Sarah on the timeline change?",
+    "Will do. I'll set up a quick sync with her this afternoon. Anything else?",
+    "No, that's it. Good meeting. Let's regroup on Friday to check progress.",
+  ];
+
+  // Inject all segments quickly — the 40-second buffer will batch them into a chunk
+  for (const text of segments) {
+    session.onTranscription(text, true);
+  }
+
+  return c.json({
+    success: true,
+    message: `Injected ${segments.length} segments into ${userId}'s session. The chunk buffer will emit a chunk in ~40 seconds.`,
+    chunkBufferRunning: session.chunkBuffer.isRunning,
+    tip: "Watch the server logs for [ChunkBuffer], [Triage], [Tracker], and [ConvManager] output.",
   });
 });
 
@@ -672,6 +770,510 @@ api.get("/photos/:date/:filename", authMiddleware, async (c) => {
     console.error("[Photo Proxy] Error:", err);
     return c.json({ error: "Failed to fetch photo" }, 500);
   }
+});
+
+// =============================================================================
+// Email Endpoints
+// =============================================================================
+
+/**
+ * POST /email/send - Send notes email (supports multiple notes in one email)
+ */
+api.post("/email/send", authMiddleware, async (c) => {
+  try {
+    const body = await c.req.json();
+    const { to, cc, sessionDate, sessionStartTime, sessionEndTime, notes } = body;
+
+    if (!to) {
+      return c.json({ error: "\"to\" email address is required" }, 400);
+    }
+    if (!Array.isArray(notes) || notes.length === 0) {
+      return c.json({ error: "notes array is required and must not be empty" }, 400);
+    }
+
+    // Validate each note item
+    for (const note of notes) {
+      if (!note.noteId || typeof note.noteContent !== "string") {
+        return c.json({ error: "Each note must have noteId and noteContent" }, 400);
+      }
+    }
+
+    // Sanitize note content for email
+    const sanitizedNotes = notes.map((note: any) => ({
+      ...note,
+      noteTitle: sanitizeEmailHtml(note.noteTitle),
+      noteContent: sanitizeEmailHtml(note.noteContent),
+    }));
+
+    const { sendNotesEmail } = await import("../services/resend.service");
+    const baseUrl = getBaseUrl(c);
+    const result = await sendNotesEmail({
+      to,
+      cc: cc || undefined,
+      sessionDate: sessionDate || "Unknown Date",
+      sessionStartTime: sessionStartTime || "",
+      sessionEndTime: sessionEndTime || "",
+      notes: sanitizedNotes,
+      baseUrl,
+    });
+
+    return c.json({ success: true, data: result });
+  } catch (err: any) {
+    console.error("[Email Send] Error:", err);
+    return c.json({ error: "Failed to send email" }, 500);
+  }
+});
+
+// =============================================================================
+// Note Download Endpoints (linked from emails)
+// =============================================================================
+
+/**
+ * GET /notes/:id/download/:format - Download a note as TXT, PDF, or DOCX
+ */
+api.get("/notes/:id/download/:format", async (c) => {
+  try {
+    const noteId = c.req.param("id");
+    const format = c.req.param("format");
+    const token = c.req.query("token");
+
+    // Verify signed token
+    const { verifyDownloadToken } = await import("../services/signedUrl.service");
+    if (!token || !verifyDownloadToken(noteId, token)) {
+      return c.json({ error: "Invalid or expired download link" }, 403);
+    }
+
+    if (!["txt", "pdf", "docx"].includes(format)) {
+      return c.json({ error: "Invalid format. Use txt, pdf, or docx" }, 400);
+    }
+
+    // Try session first, then DB
+    let noteData: { title: string; content: string; date?: string; isAIGenerated?: boolean; createdAt?: Date } | null = null;
+
+    for (const uid of sessions.getActiveUserIds()) {
+      const session = sessions.get(uid);
+      if (!session) continue;
+      const found = session.notes.notes.find((n: any) => n.id === noteId);
+      if (found) {
+        noteData = found;
+        break;
+      }
+    }
+
+    if (!noteData) {
+      const dbNote = await NoteModel.findById(noteId);
+      if (dbNote) {
+        noteData = {
+          title: dbNote.title,
+          content: dbNote.content,
+          date: dbNote.date,
+          isAIGenerated: dbNote.isAIGenerated,
+          createdAt: dbNote.createdAt as Date,
+        };
+      }
+    }
+
+    if (!noteData) {
+      return c.json({ error: "Note not found" }, 404);
+    }
+
+    const { generateTxt, generatePdf, generateDocx } = await import("../services/noteExport.service");
+
+    const noteDate = noteData.date
+      ? new Date(noteData.date + "T00:00:00").toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })
+      : undefined;
+    const noteTimestamp = noteData.createdAt
+      ? new Date(noteData.createdAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
+      : undefined;
+    const noteType = noteData.isAIGenerated ? "AI Generated" : "Manual";
+
+    // Rewrite private R2 URLs to public URLs so images can be fetched
+    const publicContent = rewriteR2Urls(noteData.content);
+
+    const exportData = {
+      title: noteData.title,
+      content: publicContent,
+      sessionDate: noteDate,
+      noteType,
+      noteTimestamp,
+    };
+
+    const safeTitle = noteData.title.replace(/[^a-zA-Z0-9-_ ]/g, "").substring(0, 50).trim() || "note";
+
+    if (format === "txt") {
+      const buffer = generateTxt(exportData);
+      return new Response(new Uint8Array(buffer), {
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${safeTitle}.txt"`,
+        },
+      });
+    }
+
+    if (format === "pdf") {
+      const pdfBytes = await generatePdf(exportData);
+      return new Response(new Uint8Array(pdfBytes), {
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `attachment; filename="${safeTitle}.pdf"`,
+        },
+      });
+    }
+
+    if (format === "docx") {
+      const docxBuffer = await generateDocx(exportData);
+      return new Response(new Uint8Array(docxBuffer), {
+        headers: {
+          "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "Content-Disposition": `attachment; filename="${safeTitle}.docx"`,
+        },
+      });
+    }
+
+    return c.json({ error: "Invalid format" }, 400);
+  } catch (err: any) {
+    console.error("[Note Download] Error:", err);
+    return c.json({ error: "Failed to generate download" }, 500);
+  }
+});
+
+// =============================================================================
+// Transcript Email & Download Endpoints
+// =============================================================================
+
+/**
+ * POST /transcript/email - Send transcript via email
+ */
+api.post("/transcript/email", authMiddleware, async (c) => {
+  try {
+    const body = await c.req.json();
+    const { to, cc, userId, date, sessionDate, sessionStartTime, sessionEndTime, segments } = body;
+
+    if (!to) {
+      return c.json({ error: '"to" email address is required' }, 400);
+    }
+    if (!userId || !date) {
+      return c.json({ error: "userId and date are required" }, 400);
+    }
+    if (!segments || !Array.isArray(segments) || segments.length === 0) {
+      return c.json({ error: "segments array is required" }, 400);
+    }
+
+    // Validate each segment
+    for (const seg of segments) {
+      if (typeof seg.timestamp !== "string" || typeof seg.text !== "string") {
+        return c.json({ error: "Each segment must have timestamp and text strings" }, 400);
+      }
+    }
+
+    const { sendTranscriptEmail } = await import("../services/resend.service");
+    const transcriptId = `${userId}:${date}`;
+    const baseUrl = getBaseUrl(c);
+
+    const result = await sendTranscriptEmail({
+      to,
+      cc: cc || undefined,
+      transcriptId,
+      sessionDate: sessionDate || date,
+      sessionStartTime: sessionStartTime || "",
+      sessionEndTime: sessionEndTime || "",
+      segments,
+      baseUrl,
+    });
+
+    return c.json({ success: true, data: result });
+  } catch (err: any) {
+    console.error("[Transcript Email] Error:", err);
+    return c.json({ error: "Failed to send email" }, 500);
+  }
+});
+
+/**
+ * GET /transcripts/:transcriptId/download/:format - Download transcript as TXT, PDF, or DOCX
+ * transcriptId format: userId:YYYY-MM-DD
+ */
+api.get("/transcripts/:transcriptId/download/:format", async (c) => {
+  try {
+    const transcriptId = c.req.param("transcriptId");
+    const format = c.req.param("format");
+    const token = c.req.query("token");
+
+    // Verify signed token
+    const { verifyDownloadToken } = await import("../services/signedUrl.service");
+    if (!token || !verifyDownloadToken(transcriptId, token)) {
+      return c.json({ error: "Invalid or expired download link" }, 403);
+    }
+
+    if (!["txt", "pdf", "docx"].includes(format)) {
+      return c.json({ error: "Invalid format. Use txt, pdf, or docx" }, 400);
+    }
+
+    // Parse composite ID
+    const colonIdx = transcriptId.indexOf(":");
+    if (colonIdx === -1) {
+      return c.json({ error: "Invalid transcript ID" }, 400);
+    }
+    const userId = transcriptId.substring(0, colonIdx);
+    const date = transcriptId.substring(colonIdx + 1);
+
+    // Try 3 sources: in-memory session → MongoDB → R2
+    let segments: { text: string; timestamp: Date; isFinal: boolean; type?: string }[] = [];
+
+    // 1. In-memory session (today's live transcript)
+    const session = sessions.get(userId);
+    if (session) {
+      const liveSegs = session.transcript.segments || [];
+      const dateSegs = liveSegs.filter((s: any) => {
+        if (!s.timestamp) return false;
+        const iso = s.timestamp instanceof Date ? s.timestamp.toISOString() : String(s.timestamp);
+        return iso.slice(0, 10) === date;
+      });
+      if (dateSegs.length > 0) {
+        segments = dateSegs.filter((s: any) => s.isFinal && s.type !== "photo");
+      }
+    }
+
+    // 2. MongoDB
+    if (segments.length === 0) {
+      const transcript = await getDailyTranscript(userId, date);
+      const dbSegs = (transcript?.segments || []).filter(
+        (s) => s.isFinal && s.type !== "photo"
+      );
+      if (dbSegs.length > 0) {
+        segments = dbSegs;
+      }
+    }
+
+    // 3. R2 (historical transcripts)
+    if (segments.length === 0) {
+      const { fetchTranscriptFromR2 } = await import("../services/r2Fetch.service");
+      const r2Result = await fetchTranscriptFromR2({ userId, date });
+      if (r2Result.success && r2Result.data?.segments) {
+        segments = r2Result.data.segments
+          .filter((s) => s.isFinal && s.type !== "photo")
+          .map((s) => ({
+            text: s.text,
+            timestamp: new Date(s.timestamp),
+            isFinal: s.isFinal,
+            type: s.type,
+          }));
+      }
+    }
+
+    if (segments.length === 0) {
+      return c.json({ error: "No transcript segments found" }, 404);
+    }
+
+    // Format segments for export
+    const formattedSegments = segments.map((s) => ({
+      timestamp: new Date(s.timestamp).toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }),
+      text: s.text,
+    }));
+
+    const sessionDate = new Date(date + "T00:00:00").toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+
+    const firstTime = new Date(segments[0].timestamp).toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+    const lastTime = new Date(segments[segments.length - 1].timestamp).toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+    const sessionTimeRange = `${firstTime} \u2014 ${lastTime}`;
+
+    const exportData = {
+      sessionDate,
+      sessionTimeRange,
+      segments: formattedSegments,
+    };
+
+    const safeDate = date.replace(/[^a-zA-Z0-9-]/g, "");
+    const filename = `Transcript-${safeDate}`;
+
+    const {
+      generateTranscriptTxt,
+      generateTranscriptPdf,
+      generateTranscriptDocx,
+    } = await import("../services/transcriptExport.service");
+
+    if (format === "txt") {
+      const buffer = generateTranscriptTxt(exportData);
+      return new Response(new Uint8Array(buffer), {
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${filename}.txt"`,
+        },
+      });
+    }
+
+    if (format === "pdf") {
+      const pdfBytes = await generateTranscriptPdf(exportData);
+      return new Response(new Uint8Array(pdfBytes), {
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `attachment; filename="${filename}.pdf"`,
+        },
+      });
+    }
+
+    if (format === "docx") {
+      const docxBuffer = await generateTranscriptDocx(exportData);
+      return new Response(new Uint8Array(docxBuffer), {
+        headers: {
+          "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "Content-Disposition": `attachment; filename="${filename}.docx"`,
+        },
+      });
+    }
+
+    return c.json({ error: "Invalid format" }, 400);
+  } catch (err: any) {
+    console.error("[Transcript Download] Error:", err);
+    return c.json({ error: "Failed to generate download" }, 500);
+  }
+});
+
+// =============================================================================
+// Conversations Endpoint
+// =============================================================================
+
+/**
+ * GET /conversations/:date - Get conversations for a specific date (YYYY-MM-DD)
+ * Used by the frontend to load conversations for past days.
+ * Today's conversations are handled via WebSocket sync.
+ */
+api.get("/conversations/:date", authMiddleware, async (c) => {
+  try {
+    const userId = requireAuth(c);
+    const date = c.req.param("date");
+
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return c.json({ error: "Invalid date format. Use YYYY-MM-DD." }, 400);
+    }
+
+    const { getConversationsByDate } = await import("../models/conversation.model");
+    const { getChunksByConversationId } = await import("../models/transcript-chunk.model");
+
+    const dbConversations = await getConversationsByDate(userId, date);
+
+    const conversations = await Promise.all(
+      dbConversations.map(async (conv) => {
+        const convId = conv._id!.toString();
+        const dbChunks = await getChunksByConversationId(convId);
+        const chunks = dbChunks.map((chunk) => ({
+          id: chunk._id!.toString(),
+          text: chunk.text,
+          startTime: chunk.startTime,
+          endTime: chunk.endTime,
+          wordCount: chunk.wordCount,
+        }));
+
+        return {
+          id: convId,
+          userId: conv.userId,
+          date: conv.date,
+          title: conv.title || "",
+          status: conv.status,
+          startTime: conv.startTime,
+          endTime: conv.endTime,
+          runningSummary: conv.runningSummary,
+          aiSummary: conv.aiSummary || "",
+          generatingSummary: conv.generatingSummary || false,
+          chunks,
+        };
+      }),
+    );
+
+    return c.json({ conversations });
+  } catch (err: any) {
+    console.error("[Conversations] Error:", err);
+    return c.json({ error: err.error || "Failed to fetch conversations" }, err.status || 500);
+  }
+});
+
+// =============================================================================
+// Search Endpoint
+// =============================================================================
+
+/**
+ * GET /search?q=<query>&limit=<number>&ai=true - Semantic search over notes & conversations
+ */
+api.get("/search", authMiddleware, async (c) => {
+  try {
+    // Try standard auth first, fall back to userId query param
+    // (cookie auth may not work in all browser contexts through ngrok)
+    const userId = getUserId(c) || c.req.query("userId") as string;
+    if (!userId) {
+      throw { error: "Unauthorized", status: 401 };
+    }
+    const query = c.req.query("q");
+    const limitParam = c.req.query("limit");
+    const aiParam = c.req.query("ai");
+
+    if (!query || !query.trim()) {
+      return c.json({ error: "Query parameter 'q' is required" }, 400);
+    }
+
+    const limit = limitParam ? parseInt(limitParam, 10) : 10;
+
+    const { semanticSearch } = await import("../core/semantic-search/search.service");
+    const results = await semanticSearch(userId, query.trim(), limit);
+
+    // Phase 3: AI quick answer
+    if (aiParam === "true" && results.length > 0) {
+      const { generateAnswer } = await import("../core/semantic-search/answer.service");
+      const answer = await generateAnswer(query.trim(), results);
+      return c.json({ answer, results });
+    }
+
+    return c.json({ results });
+  } catch (err: any) {
+    console.error("[Search] Error:", err);
+    return c.json({ error: err.error || "Search failed" }, err.status || 500);
+  }
+});
+
+// =============================================================================
+// PostHog Reverse Proxy (bypasses ad blockers)
+// =============================================================================
+
+const POSTHOG_HOST = "https://us.i.posthog.com";
+
+api.all("/posthog/*", async (c) => {
+  const path = c.req.path.replace(/^\/api\/posthog/, "");
+  const url = new URL(path || "/", POSTHOG_HOST);
+
+  // Forward query params
+  const reqUrl = new URL(c.req.url);
+  reqUrl.searchParams.forEach((val, key) => url.searchParams.set(key, val));
+
+  const headers = new Headers();
+  headers.set("Content-Type", c.req.header("content-type") || "application/json");
+
+  const res = await fetch(url.toString(), {
+    method: c.req.method,
+    headers,
+    body: ["GET", "HEAD"].includes(c.req.method) ? undefined : await c.req.raw.arrayBuffer(),
+  });
+
+  return new Response(res.body, {
+    status: res.status,
+    headers: {
+      "Content-Type": res.headers.get("content-type") || "application/json",
+      "Access-Control-Allow-Origin": "*",
+    },
+  });
 });
 
 // =============================================================================
