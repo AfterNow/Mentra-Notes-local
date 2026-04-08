@@ -285,7 +285,7 @@ export interface ChatOptions {
 /**
  * Supported provider names
  */
-export type ProviderName = "anthropic" | "gemini" | "openai";
+export type ProviderName = "anthropic" | "gemini" | "openai" | "ollama" | "llamacpp";
 
 /**
  * Provider capabilities

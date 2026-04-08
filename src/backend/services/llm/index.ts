@@ -57,6 +57,8 @@ export type {
 import { createAnthropicProvider, AnthropicProvider } from "./anthropic";
 import { createGeminiProvider, GeminiProvider } from "./gemini";
 import { createOpenAIProvider, OpenAIProvider } from "./openai";
+import { createOllamaProvider, OllamaProvider } from "./ollama";
+import { createLlamaCppProvider, LlamaCppProvider } from "./llamacpp";
 
 // Import types for factory
 import type {
@@ -75,6 +77,10 @@ export {
   createGeminiProvider,
   OpenAIProvider,
   createOpenAIProvider,
+  OllamaProvider,
+  createOllamaProvider,
+  LlamaCppProvider,
+  createLlamaCppProvider,
 };
 
 // Re-export utility functions from both providers
@@ -92,6 +98,8 @@ const providerRegistry: ProviderRegistry = {
   anthropic: createAnthropicProvider,
   gemini: createGeminiProvider,
   openai: createOpenAIProvider,
+  ollama: createOllamaProvider,
+  llamacpp: createLlamaCppProvider,
 };
 
 /**
@@ -109,6 +117,14 @@ export const DEFAULT_MODELS: Record<ProviderName, ModelConfig> = {
   openai: {
     fast: "gpt-4o-mini",
     smart: "gpt-4o",
+  },
+  ollama: {
+    fast: "llama3.1",
+    smart: "llama3.1:70b",
+  },
+  llamacpp: {
+    fast: "local-model",
+    smart: "local-model",
   },
 };
 
@@ -173,6 +189,14 @@ export function getProviderFromEnv(): ProviderName {
     return "openai";
   }
 
+  if (envProvider === "ollama") {
+    return "ollama";
+  }
+
+  if (envProvider === "llamacpp" || envProvider === "llama") {
+    return "llamacpp";
+  }
+
   // Default to Gemini 3 Flash - fast and intelligent
   return "gemini";
 }
@@ -206,6 +230,14 @@ export function getApiKeyFromEnv(provider: ProviderName): string {
       }
       return openaiKey;
 
+    case "ollama":
+      // Ollama typically doesn't need an API key for local deployment
+      return process.env.OLLAMA_API_KEY || "";
+
+    case "llamacpp":
+      // llama.cpp typically doesn't need an API key for local deployment
+      return process.env.LLAMACPP_API_KEY || "";
+
     default:
       throw new Error(`Unknown provider: ${provider}`);
   }
@@ -229,8 +261,33 @@ export function createProviderFromEnv(
   const providerName = getProviderFromEnv();
   const apiKey = getApiKeyFromEnv(providerName);
 
+  // Get base URL from environment for local providers
+  let baseUrl = overrides?.baseUrl;
+  if (!baseUrl) {
+    if (providerName === "ollama") {
+      baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+    } else if (providerName === "llamacpp") {
+      baseUrl = process.env.LLAMACPP_BASE_URL || "http://localhost:8080";
+    }
+  }
+
+  // Get custom model configuration from environment
+  let models = overrides?.models;
+  if (!models) {
+    if (providerName === "ollama") {
+      const fast = process.env.OLLAMA_MODEL_FAST || DEFAULT_MODELS.ollama.fast;
+      const smart = process.env.OLLAMA_MODEL_SMART || DEFAULT_MODELS.ollama.smart;
+      models = { fast, smart };
+    } else if (providerName === "llamacpp") {
+      const model = process.env.LLAMACPP_MODEL || DEFAULT_MODELS.llamacpp.fast;
+      models = { fast: model, smart: model };
+    }
+  }
+
   return createProvider(providerName, {
     apiKey,
+    baseUrl,
+    models,
     ...overrides,
   });
 }
@@ -251,6 +308,6 @@ export function isProviderAvailable(provider: ProviderName): boolean {
  * Get list of available providers (those with API keys configured)
  */
 export function getAvailableProviders(): ProviderName[] {
-  const providers: ProviderName[] = ["anthropic", "gemini", "openai"];
+  const providers: ProviderName[] = ["anthropic", "gemini", "openai", "ollama", "llamacpp"];
   return providers.filter(isProviderAvailable);
 }
