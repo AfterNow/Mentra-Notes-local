@@ -18,9 +18,11 @@ import { createMentraAuthRoutes } from "@mentra/sdk";
 import indexDev from "./frontend/index.html";
 import indexProd from "./frontend/index.prod.html";
 import { sessions } from "./backend/session";
+import { getStorageProvider, isStorageAvailable } from "./backend/services/storage";
 
 // Configuration from environment
 const PORT = parseInt(process.env.PORT || "3000", 10);
+const HOST = process.env.HOST || "0.0.0.0"; // Default to 0.0.0.0 for Docker
 const PACKAGE_NAME = process.env.PACKAGE_NAME;
 const API_KEY = process.env.MENTRAOS_API_KEY;
 const COOKIE_SECRET = process.env.COOKIE_SECRET || API_KEY;
@@ -37,19 +39,57 @@ if (!API_KEY) {
 }
 
 // Check optional integrations
+const agentProvider = process.env.AGENT_PROVIDER?.toLowerCase();
 const hasGemini = !!process.env.GEMINI_API_KEY;
 const hasAnthropic = !!process.env.ANTHROPIC_API_KEY;
-const hasAI = hasGemini || hasAnthropic;
+const hasOpenAI = !!process.env.OPENAI_API_KEY;
+const hasOllama = agentProvider === "ollama";
+const hasLlamaCpp = agentProvider === "llamacpp" || agentProvider === "llama";
+const hasLocalLLM = hasOllama || hasLlamaCpp;
+const hasCloudLLM = hasGemini || hasAnthropic || hasOpenAI;
+const hasAI = hasLocalLLM || hasCloudLLM;
 const hasMongoDB = !!process.env.MONGODB_URI;
+
+function getAIProviderStatus(): string {
+  if (hasOllama) {
+    const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+    const model = process.env.OLLAMA_MODEL_FAST || "llama3.1";
+    return `✅ Ollama (${model} @ ${baseUrl})`;
+  }
+  if (hasLlamaCpp) {
+    const baseUrl = process.env.LLAMACPP_BASE_URL || "http://localhost:8080";
+    const model = process.env.LLAMACPP_MODEL || "local-model";
+    return `✅ llama.cpp (${model} @ ${baseUrl})`;
+  }
+  if (hasGemini) return "✅ Gemini";
+  if (hasAnthropic) return "✅ Anthropic";
+  if (hasOpenAI) return "✅ OpenAI";
+  return "⚠️  (Optional - Set AGENT_PROVIDER or API keys for AI features)";
+}
+
+function getStorageStatus(): string {
+  const storageProvider = getStorageProvider();
+  const storageAvailable = isStorageAvailable();
+  const storagePath = process.env.LOCAL_STORAGE_PATH || "./data/storage";
+
+  if (!storageAvailable) {
+    return "⚠️  Not configured";
+  }
+
+  if (storageProvider === "r2") {
+    return "✅ Cloudflare R2";
+  }
+
+  return `✅ Local (${storagePath})`;
+}
 
 console.log("🚀 Starting Notes - All-day transcription app\n");
 console.log(`   Package: ${PACKAGE_NAME}`);
-console.log(`   Port: ${PORT}`);
+console.log(`   Host: ${HOST}:${PORT}`);
 console.log("");
 console.log("   Integrations:");
-console.log(
-  `   • AI Provider: ${hasAI ? (hasGemini ? "✅ Gemini" : "✅ Anthropic") : "⚠️  (Optional - Set GEMINI_API_KEY or ANTHROPIC_API_KEY for AI summaries)"}`,
-);
+console.log(`   • AI Provider: ${getAIProviderStatus()}`);
+console.log(`   • Storage:     ${getStorageStatus()}`);
 console.log(
   `   • MongoDB:     ${hasMongoDB ? "✅ MongoDB URI" : "⚠️  (Optional - Set MONGODB_URI for persistence)"}`,
 );
@@ -80,9 +120,9 @@ app.route("/api", api);
 // Start the SDK app (registers SDK routes, checks version)
 await app.start();
 
-console.log(`✅ Notes app running at http://localhost:${PORT}`);
-console.log(`   • Webview: http://localhost:${PORT}`);
-console.log(`   • API: http://localhost:${PORT}/api/health`);
+console.log(`✅ Notes app running at http://${HOST}:${PORT}`);
+console.log(`   • Webview: http://${HOST}:${PORT}`);
+console.log(`   • API: http://${HOST}:${PORT}/api/health`);
 console.log("");
 
 // Determine environment
@@ -91,6 +131,7 @@ const isDevelopment = process.env.NODE_ENV === "development";
 // Start Bun server with HMR support and WebSocket
 Bun.serve({
   port: PORT,
+  hostname: HOST,
   idleTimeout: 120, // 2 minutes for SSE connections
   development: isDevelopment && {
     hmr: true,

@@ -12,10 +12,9 @@ import {
   type TranscriptBatchResult,
 } from "../../services/r2Batch.service";
 import {
-  fetchTranscriptFromR2,
-  listR2TranscriptDates,
-} from "../../services/r2Fetch.service";
-import type { R2BatchData } from "../../services/r2Upload.service";
+  getStorageService,
+  type StorageBatchData,
+} from "../../services/storage";
 import {
   getUserState,
   createUserState,
@@ -352,53 +351,56 @@ export class CloudflareR2Manager extends SyncedManager {
   // ===========================================================================
 
   /**
-   * Fetch transcript data from R2 for a specific date
-   * Returns the R2BatchData if found, null otherwise
+   * Fetch transcript data from storage for a specific date
+   * Returns the StorageBatchData if found, null otherwise
    */
-  async fetchTranscript(date: string): Promise<R2BatchData | null> {
+  async fetchTranscript(date: string): Promise<StorageBatchData | null> {
     const userId = this._session?.userId;
     if (!userId) {
-      console.error(`[R2Manager] No user session for fetch`);
+      console.error(`[StorageManager] No user session for fetch`);
       return null;
     }
 
-    console.log(`[R2Manager] fetchTranscript(${date}) for user ${userId}`);
+    console.log(`[StorageManager] fetchTranscript(${date}) for user ${userId}`);
     try {
-      const result = await fetchTranscriptFromR2({ userId, date });
+      const storageService = getStorageService();
+      const data = await storageService.fetchTranscript(userId, date);
 
-      if (result.success && result.data) {
-        console.log(`[R2Manager] ✓ Found R2 transcript for ${date}: ${result.data.segments?.length || 0} segments`);
-        return result.data;
+      if (data) {
+        console.log(`[StorageManager] ✓ Found transcript for ${date}: ${data.segments?.length || 0} segments`);
+        return data;
       } else {
-        console.log(`[R2Manager] ✗ No R2 transcript found for ${date}`);
+        console.log(`[StorageManager] ✗ No transcript found for ${date}`);
         return null;
       }
     } catch {
-      console.log(`[R2Manager] ✗ R2 fetch failed for ${date}`);
+      console.log(`[StorageManager] ✗ Fetch failed for ${date}`);
       return null;
     }
   }
 
   /**
-   * Get list of dates that have transcripts in R2
+   * Get list of dates that have transcripts in storage
    * Called during hydrate to populate folder list
    */
   async loadR2AvailableDates(): Promise<string[]> {
     const userId = this._session?.userId;
     if (!userId) {
-      console.log(`[R2Manager] loadR2AvailableDates: No userId`);
+      console.log(`[StorageManager] loadR2AvailableDates: No userId`);
       return [];
     }
 
-    console.log(`[R2Manager] Loading available R2 dates for ${userId}...`);
-    const result = await listR2TranscriptDates(userId);
-    if (result.success) {
-      console.log(`[R2Manager] ✓ Found ${result.dates.length} R2 dates:`, result.dates);
-      this.r2AvailableDates = result.dates;
-      return result.dates;
+    console.log(`[StorageManager] Loading available dates for ${userId}...`);
+    try {
+      const storageService = getStorageService();
+      const dates = await storageService.listDates(userId);
+      console.log(`[StorageManager] ✓ Found ${dates.length} dates:`, dates);
+      this.r2AvailableDates = dates;
+      return dates;
+    } catch (error) {
+      console.log(`[StorageManager] ✗ Failed to list dates:`, error);
+      return [];
     }
-    console.log(`[R2Manager] ✗ Failed to list R2 dates:`, result.error || 'unknown error');
-    return [];
   }
 
   // ===========================================================================

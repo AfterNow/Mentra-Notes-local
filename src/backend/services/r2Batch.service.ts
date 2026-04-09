@@ -3,10 +3,10 @@ import {
   type TranscriptSegmentI,
 } from "../models/daily-transcript.model";
 import {
-  uploadBatchToR2,
   formatSegmentForR2,
   type R2TranscriptSegment,
 } from "./r2Upload.service";
+import { getStorageService, type StorageSegment } from "./storage";
 
 // =============================================================================
 // Interfaces
@@ -123,26 +123,41 @@ export async function batchTranscriptsToR2(params: {
       };
     }
 
-    // Upload each day's segments to R2
+    // Upload each day's segments using storage abstraction
+    const storageService = getStorageService();
     let totalUploaded = 0;
     let lastUrl: string | undefined;
     const successfullyBatchedDates: string[] = [];
 
     for (const [date, r2Segments] of Object.entries(segmentsByDateForR2)) {
       console.log(
-        `[R2Batch] Uploading ${r2Segments.length} segments for ${date}`,
+        `[Batch] Uploading ${r2Segments.length} segments for ${date}`,
       );
 
-      const result = await uploadBatchToR2({
+      // Convert R2TranscriptSegment to StorageSegment
+      const storageSegments: StorageSegment[] = r2Segments.map((s) => ({
+        text: s.text,
+        timestamp: s.timestamp,
+        isFinal: s.isFinal,
+        speakerId: s.speakerId,
+        index: s.index,
+        type: s.type,
+        photoUrl: s.photoUrl,
+        photoMimeType: s.photoMimeType,
+        photoDescription: s.photoDescription,
+        timezone: s.timezone,
+      }));
+
+      const result = await storageService.uploadBatch({
         userId,
         date,
-        segments: r2Segments,
+        segments: storageSegments,
         timezone,
       });
 
       if (!result.success) {
         console.error(
-          `[R2Batch] Failed to upload batch for ${date}:`,
+          `[Batch] Failed to upload batch for ${date}:`,
           result.error,
         );
         return {
@@ -159,7 +174,7 @@ export async function batchTranscriptsToR2(params: {
       lastUrl = result.url;
       successfullyBatchedDates.push(date);
       console.log(
-        `[R2Batch] ✓ Successfully uploaded ${r2Segments.length} segments for ${date}`,
+        `[Batch] ✓ Successfully uploaded ${r2Segments.length} segments for ${date}`,
       );
     }
 
