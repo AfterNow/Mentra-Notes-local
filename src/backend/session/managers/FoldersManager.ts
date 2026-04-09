@@ -15,6 +15,7 @@ import {
   unassignNotesFromFolder,
   type FolderColor,
 } from "../../models";
+import { isDBReady } from "../../services/db";
 
 // =============================================================================
 // Types
@@ -42,6 +43,12 @@ export class FoldersManager extends SyncedManager {
   async hydrate(): Promise<void> {
     const userId = this._session?.userId;
     if (!userId) return;
+
+    // Skip database operations if MongoDB is not connected
+    if (!isDBReady()) {
+      console.log(`[FoldersManager] DB not ready, using empty folders for ${userId}`);
+      return;
+    }
 
     try {
       // Seed defaults if no folders exist, then load all

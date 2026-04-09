@@ -24,6 +24,7 @@ import {
 } from "../../models";
 import { deleteFromR2 } from "../../services/r2Upload.service";
 import { TimeManager } from "./TimeManager";
+import { isDBReady } from "../../services/db";
 
 // =============================================================================
 // Types
@@ -83,6 +84,13 @@ export class FileManager extends SyncedManager {
   async hydrate(): Promise<void> {
     const userId = this._session?.userId;
     if (!userId) return;
+
+    // Skip database operations if MongoDB is not connected
+    if (!isDBReady()) {
+      console.log(`[FileManager] DB not ready, using empty files for ${userId}`);
+      this.isLoading = false;
+      return;
+    }
 
     // Skip if initial hydration is done - don't re-hydrate on reconnects
     // This prevents the glitchy behavior when clients connect/disconnect

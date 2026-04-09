@@ -19,6 +19,7 @@ import {
 } from "../../models/transcript-chunk.model";
 import { AUTO_NOTES_CONFIG } from "../../core/auto-conversation/config";
 import { TimeManager } from "./TimeManager";
+import { isDBReady } from "../../services/db";
 
 export type ChunkReadyCallback = (chunk: TranscriptChunkI) => void;
 
@@ -41,6 +42,13 @@ export class ChunkBufferManager extends SyncedManager {
   async hydrate(): Promise<void> {
     const userId = this._session?.userId;
     if (!userId) return;
+
+    // Skip database operations if MongoDB is not connected
+    if (!isDBReady()) {
+      console.log(`[ChunkBuffer] DB not ready, using default chunk index for ${userId}`);
+      this.chunkIndex = 0;
+      return;
+    }
 
     try {
       const today = this.getTimeManager().today();

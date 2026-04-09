@@ -24,6 +24,7 @@ import type {
   ConversationChunk,
   ConversationSegment,
 } from "../../../shared/types";
+import { isDBReady } from "../../services/db";
 
 // =============================================================================
 // Manager
@@ -48,6 +49,12 @@ export class ConversationManager extends SyncedManager {
   async hydrate(): Promise<void> {
     const userId = this._session?.userId;
     if (!userId) return;
+
+    // Skip database operations if MongoDB is not connected
+    if (!isDBReady()) {
+      console.log(`[ConvManager] DB not ready, using empty conversations for ${userId}`);
+      return;
+    }
 
     try {
       const today = this.getTimeManager().today();

@@ -13,8 +13,11 @@
 import { AppServer, AppSession } from "@mentra/sdk";
 import { sessions, NotesSession } from "./session";
 import { TimeManager } from "./session/managers/TimeManager";
-import { connectDB, disconnectDB } from "./services/db";
+import { connectDB, disconnectDB, isDBReady } from "./services/db";
 
+// Track if database initialization is complete
+let dbInitialized = false;
+let dbInitPromise: Promise<void> | null = null;
 
 export interface NotesAppConfig {
   packageName: string;
@@ -38,8 +41,8 @@ export class NotesApp extends AppServer {
       cookieSecret: config.cookieSecret,
     });
 
-    // Connect to MongoDB on startup
-    this.initDatabase();
+    // Connect to MongoDB on startup (don't block constructor)
+    dbInitPromise = this.initDatabase();
   }
 
   /**
@@ -51,7 +54,25 @@ export class NotesApp extends AppServer {
     } catch (error) {
       console.error("[NotesApp] Failed to connect to database:", error);
       // Continue without DB - app will work with in-memory storage
+    } finally {
+      dbInitialized = true;
     }
+  }
+
+  /**
+   * Wait for database initialization to complete
+   */
+  static async waitForDB(): Promise<void> {
+    if (dbInitPromise) {
+      await dbInitPromise;
+    }
+  }
+
+  /**
+   * Check if database is ready for use
+   */
+  static isDBReady(): boolean {
+    return dbInitialized && isDBReady();
   }
 
   /**

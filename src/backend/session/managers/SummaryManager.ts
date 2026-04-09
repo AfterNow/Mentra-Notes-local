@@ -17,6 +17,7 @@ import {
 } from "../../services/llm";
 import { TimeManager } from "./TimeManager";
 import type { TranscriptSegment, HourSummary } from "./TranscriptManager";
+import { isDBReady } from "../../services/db";
 
 // =============================================================================
 // Manager
@@ -76,19 +77,24 @@ export class SummaryManager extends SyncedManager {
     try {
       const today = this.getTimeManager().today();
 
-      const savedSummaries = await getHourSummaries(userId, today);
-      if (savedSummaries.length > 0) {
-        const loadedSummaries: HourSummary[] = savedSummaries.map((s) => ({
-          id: `summary_${s.date}_${s.hour}`,
-          date: s.date,
-          hour: s.hour,
-          hourLabel: s.hourLabel,
-          summary: s.summary,
-          segmentCount: s.segmentCount,
-          createdAt: s.createdAt,
-          updatedAt: s.updatedAt,
-        }));
-        this.hourSummaries.set(loadedSummaries);
+      // Load summaries from database if connected
+      if (isDBReady()) {
+        const savedSummaries = await getHourSummaries(userId, today);
+        if (savedSummaries.length > 0) {
+          const loadedSummaries: HourSummary[] = savedSummaries.map((s) => ({
+            id: `summary_${s.date}_${s.hour}`,
+            date: s.date,
+            hour: s.hour,
+            hourLabel: s.hourLabel,
+            summary: s.summary,
+            segmentCount: s.segmentCount,
+            createdAt: s.createdAt,
+            updatedAt: s.updatedAt,
+          }));
+          this.hourSummaries.set(loadedSummaries);
+        }
+      } else {
+        console.log(`[SummaryManager] DB not ready, skipping summary load for ${userId}`);
       }
 
       this.startRollingSummaryTimer();
