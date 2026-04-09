@@ -9,15 +9,36 @@
 
 import OpenAI from "openai";
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
 const EMBEDDING_MODEL = "text-embedding-3-small";
+
+// Lazy-initialized OpenAI client to avoid errors when API key is not set
+let _client: OpenAI | null = null;
+
+function getClient(): OpenAI {
+  if (!_client) {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        "OPENAI_API_KEY is required for embeddings. Set it in your environment or disable embedding features.",
+      );
+    }
+    _client = new OpenAI({ apiKey });
+  }
+  return _client;
+}
+
+/**
+ * Check if embedding service is available (OpenAI API key is configured)
+ */
+export function isEmbeddingAvailable(): boolean {
+  return !!process.env.OPENAI_API_KEY;
+}
 
 /**
  * Generate a single embedding vector from text
  */
 export async function generateEmbedding(text: string): Promise<number[]> {
-  const response = await client.embeddings.create({
+  const response = await getClient().embeddings.create({
     model: EMBEDDING_MODEL,
     input: text,
   });
@@ -30,7 +51,7 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 export async function generateEmbeddings(
   texts: string[],
 ): Promise<number[][]> {
-  const response = await client.embeddings.create({
+  const response = await getClient().embeddings.create({
     model: EMBEDDING_MODEL,
     input: texts,
   });
@@ -85,12 +106,15 @@ export function prepareConversationText(
 /**
  * Generate and save embedding for a note (fire-and-forget).
  * Imports Note model lazily to avoid circular dependencies.
+ * Silently skips if OPENAI_API_KEY is not configured.
  */
 export async function embedNote(
   noteId: string,
   title: string,
   content: string,
 ): Promise<void> {
+  if (!isEmbeddingAvailable()) return;
+
   const text = prepareNoteText(title, content);
   if (!text) return;
 
@@ -106,12 +130,15 @@ export async function embedNote(
 /**
  * Generate and save embedding for a conversation (fire-and-forget).
  * Only embeds conversations that have an aiSummary.
+ * Silently skips if OPENAI_API_KEY is not configured.
  */
 export async function embedConversation(
   conversationId: string,
   title: string,
   aiSummary: string,
 ): Promise<void> {
+  if (!isEmbeddingAvailable()) return;
+
   const text = prepareConversationText(title, aiSummary);
   if (!text) return;
 
