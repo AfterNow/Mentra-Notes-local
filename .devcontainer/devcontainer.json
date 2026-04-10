@@ -11,7 +11,7 @@
         "--ulimit=memlock=-1",
         "--name=mentra-note-gemma4"
     ],
-    "forwardPorts": [8084, 6274, 6277],  // Ollama and auoth google + MCP Inspector
+    "forwardPorts": [27017, 30000],  // mongodb and llamacpp server ports
     "containerEnv": {
         "TZ": "America/Los_Angeles" // Set timezone
     },
