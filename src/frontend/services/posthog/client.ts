@@ -8,8 +8,10 @@
 import PostHog from "posthog-js";
 
 // Check if analytics is enabled (defaults to false for privacy)
-const isAnalyticsEnabled = import.meta.env.VITE_ENABLE_ANALYTICS === "true";
-const posthogKey = import.meta.env.VITE_POSTHOG_KEY;
+// Handle case where import.meta.env might be undefined in some builds
+const env = typeof import.meta !== "undefined" && import.meta.env ? import.meta.env : {};
+const isAnalyticsEnabled = env.VITE_ENABLE_ANALYTICS === "true";
+const posthogKey = env.VITE_POSTHOG_KEY as string | undefined;
 
 // Only initialize PostHog if explicitly enabled AND key is provided
 if (isAnalyticsEnabled && posthogKey) {
@@ -20,8 +22,8 @@ if (isAnalyticsEnabled && posthogKey) {
   });
   console.log("[PostHog] Analytics enabled");
 } else {
-  // Create a no-op PostHog instance for when analytics is disabled
-  console.log("[PostHog] Analytics disabled (VITE_ENABLE_ANALYTICS not set)");
+  // Analytics disabled - PostHog methods will be no-ops
+  console.log("[PostHog] Analytics disabled");
 }
 
 /**
