@@ -10,6 +10,7 @@ import {
   getOrCreateUserSettings,
   updateUserSettings,
 } from "../../models";
+import { isDBReady } from "../../services/db";
 
 // =============================================================================
 // Types
@@ -47,6 +48,12 @@ export class SettingsManager extends SyncedManager {
   async hydrate(): Promise<void> {
     const userId = this._session?.userId;
     if (!userId) return;
+
+    // Skip database operations if MongoDB is not connected
+    if (!isDBReady()) {
+      console.log(`[SettingsManager] DB not ready, using defaults for ${userId}`);
+      return;
+    }
 
     try {
       const settings = await getOrCreateUserSettings(userId);

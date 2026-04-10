@@ -16,6 +16,7 @@ import type { R2TranscriptSegment } from "../../services/r2Upload.service";
 import { TimeManager } from "./TimeManager";
 import type { FileManager } from "./FileManager";
 import type { SummaryManager } from "./SummaryManager";
+import { isDBReady } from "../../services/db";
 
 // =============================================================================
 // Types
@@ -123,12 +124,17 @@ export class TranscriptManager extends SyncedManager {
       }
       this.loadedDate = today;
 
-      // Load available dates from MongoDB
-      const mongoDbDates = await getAvailableDates(userId);
-      console.log(
-        `[TranscriptManager] MongoDB dates for ${userId}:`,
-        mongoDbDates,
-      );
+      // Load available dates from MongoDB (if connected)
+      let mongoDbDates: string[] = [];
+      if (isDBReady()) {
+        mongoDbDates = await getAvailableDates(userId);
+        console.log(
+          `[TranscriptManager] MongoDB dates for ${userId}:`,
+          mongoDbDates,
+        );
+      } else {
+        console.log(`[TranscriptManager] DB not ready, skipping MongoDB dates`);
+      }
 
       // Load available dates from R2 via R2Manager
       const r2Manager = (this._session as any)?.r2;

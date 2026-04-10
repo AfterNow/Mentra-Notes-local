@@ -16,6 +16,7 @@ import {
 import type { TranscriptSegment } from "./TranscriptManager";
 import type { FileManager } from "./FileManager";
 import { TimeManager } from "./TimeManager";
+import { isDBReady } from "../../services/db";
 
 // =============================================================================
 // Types
@@ -152,6 +153,12 @@ export class NotesManager extends SyncedManager {
   async hydrate(): Promise<void> {
     const userId = this._session?.userId;
     if (!userId) return;
+
+    // Skip database operations if MongoDB is not connected
+    if (!isDBReady()) {
+      console.log(`[NotesManager] DB not ready, using empty notes for ${userId}`);
+      return;
+    }
 
     try {
       const dbNotes = await getNotes(userId);

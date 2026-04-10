@@ -1,0 +1,22 @@
+{
+    "name": "MentraApp-DevContainer",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": ".."
+    },
+    "runArgs": [
+        "--gpus=all",
+        "--ipc=host",
+        "--ulimit=stack=67108864",
+        "--ulimit=memlock=-1",
+        "--name=mentra-note-gemma4"
+    ],
+    "forwardPorts": [27017, 30000],  // mongodb and llamacpp server ports
+    "containerEnv": {
+        "TZ": "America/Los_Angeles" // Set timezone
+    },
+    "remoteUser": "ubuntu",
+    "mounts": [
+        "source=/home/afternow/docker/Mentra-Notes-local,target=/workspace,type=bind,consistency=cached"
+    ]
+} 

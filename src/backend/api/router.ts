@@ -729,13 +729,30 @@ api.get("/photos/:date/:filename", authMiddleware, async (c) => {
     const date = c.req.param("date");
     const filename = c.req.param("filename");
 
+    // Check for local storage first
+    const storagePath = process.env.LOCAL_STORAGE_PATH || "./data/storage";
+    const localFilePath = `${storagePath}/transcripts/${userId}/${date}/photos/${filename}`;
+    const localFile = Bun.file(localFilePath);
+
+    if (await localFile.exists()) {
+      // Serve from local storage
+      const mimeType = filename.endsWith(".png") ? "image/png" : "image/jpeg";
+      return new Response(localFile, {
+        headers: {
+          "Content-Type": mimeType,
+          "Cache-Control": "public, max-age=31536000, immutable",
+        },
+      });
+    }
+
+    // Fall back to R2 if credentials are configured
     const endpoint = process.env.CLOUDFLARE_R2_ENDPOINT;
     const bucketName = process.env.CLOUDFLARE_R2_BUCKET_NAME || "mentra-notes";
     const accessKeyId = process.env.CLOUDFLARE_R2_ACCESS_KEY_ID;
     const secretAccessKey = process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY;
 
     if (!endpoint || !accessKeyId || !secretAccessKey) {
-      return c.json({ error: "R2 not configured" }, 500);
+      return c.json({ error: "Photo not found" }, 404);
     }
 
     const key = `transcripts/${userId}/${date}/photos/${filename}`;

@@ -21,6 +21,7 @@ import {
 import type { TranscriptSegment } from "./TranscriptManager";
 import type { NoteData } from "./NotesManager";
 import { TimeManager } from "./TimeManager";
+import { isDBReady } from "../../services/db";
 
 // =============================================================================
 // Types
@@ -136,6 +137,14 @@ export class ChatManager extends SyncedManager {
   async loadDateChat(date: string): Promise<ChatMessage[]> {
     const userId = this._session?.userId;
     if (!userId) {
+      this.messages.set([]);
+      this.loadedDate = date;
+      return [];
+    }
+
+    // Skip database operations if MongoDB is not connected
+    if (!isDBReady()) {
+      console.log(`[ChatManager] DB not ready, using empty chat for ${date}`);
       this.messages.set([]);
       this.loadedDate = date;
       return [];
