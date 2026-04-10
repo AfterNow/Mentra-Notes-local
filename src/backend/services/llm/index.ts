@@ -175,30 +175,57 @@ export function createProvider(
 }
 
 /**
+ * Check if local-only mode is enabled
+ * In local-only mode, only local providers (ollama, llamacpp) are allowed
+ */
+export function isLocalOnlyMode(): boolean {
+  return process.env.LOCAL_ONLY_MODE === "true";
+}
+
+/**
+ * Local providers that don't send data to external cloud services
+ */
+const LOCAL_PROVIDERS: ProviderName[] = ["ollama", "llamacpp"];
+
+/**
  * Get the provider name from environment variable
  * Defaults to 'gemini' (Gemini 3 Flash) if not set
+ *
+ * In LOCAL_ONLY_MODE, only local providers are allowed
  */
 export function getProviderFromEnv(): ProviderName {
   const envProvider = process.env.AGENT_PROVIDER?.toLowerCase();
+  const localOnly = isLocalOnlyMode();
 
+  // Parse requested provider
+  let provider: ProviderName;
   if (envProvider === "anthropic" || envProvider === "claude") {
-    return "anthropic";
+    provider = "anthropic";
+  } else if (envProvider === "openai") {
+    provider = "openai";
+  } else if (envProvider === "ollama") {
+    provider = "ollama";
+  } else if (envProvider === "llamacpp" || envProvider === "llama") {
+    provider = "llamacpp";
+  } else if (envProvider === "gemini") {
+    provider = "gemini";
+  } else {
+    // Default based on mode
+    provider = localOnly ? "llamacpp" : "gemini";
   }
 
-  if (envProvider === "openai") {
-    return "openai";
-  }
-
-  if (envProvider === "ollama") {
-    return "ollama";
-  }
-
-  if (envProvider === "llamacpp" || envProvider === "llama") {
+  // In local-only mode, enforce local providers
+  if (localOnly && !LOCAL_PROVIDERS.includes(provider)) {
+    console.warn(
+      `[LLM] LOCAL_ONLY_MODE: Provider "${provider}" is a cloud service. Defaulting to llamacpp.`,
+    );
+    console.warn(
+      `[LLM] To use cloud providers, set LOCAL_ONLY_MODE=false in your .env file.`,
+    );
     return "llamacpp";
   }
 
-  // Default to Gemini 3 Flash - fast and intelligent
-  return "gemini";
+  return provider;
 }
 
 /**

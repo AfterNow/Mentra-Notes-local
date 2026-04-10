@@ -2,23 +2,33 @@
  * PostHog feature flags
  *
  * Hook for checking feature flags + known flag constants.
+ * Returns default values when analytics is disabled.
  */
 
 import { useState, useEffect } from "react";
-import PostHog from "./client";
+import PostHog, { isPostHogEnabled } from "./client";
 
 /**
  * React hook that returns whether a feature flag is enabled.
  * Re-renders when PostHog feature flags are loaded.
+ *
+ * When analytics is disabled, immediately returns the default value.
  */
 export function useFeatureFlag(
   flag: string,
   defaultValue = false,
 ): { enabled: boolean; loaded: boolean } {
-  const [flagsLoaded, setFlagsLoaded] = useState(false);
+  const [flagsLoaded, setFlagsLoaded] = useState(!isPostHogEnabled());
   const [enabled, setEnabled] = useState(defaultValue);
 
   useEffect(() => {
+    // If analytics is disabled, use default value immediately
+    if (!isPostHogEnabled()) {
+      setEnabled(defaultValue);
+      setFlagsLoaded(true);
+      return;
+    }
+
     // Check if flags were already loaded before this hook mounted
     const val = PostHog.isFeatureEnabled(flag);
     console.log(`[PostHog] useFeatureFlag init "${flag}":`, val, "typeof:", typeof val);
@@ -47,7 +57,7 @@ export function useFeatureFlag(
       clearTimeout(timeout);
       unsubscribe();
     };
-  }, [flag]);
+  }, [flag, defaultValue]);
 
   return { enabled: flagsLoaded ? enabled : defaultValue, loaded: flagsLoaded };
 }
