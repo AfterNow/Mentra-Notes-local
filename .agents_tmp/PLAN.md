@@ -1,496 +1,961 @@
 # 1. OBJECTIVE
 
-Conduct a comprehensive privacy audit of the Mentra Notes application to ensure it can operate in a fully local/self-hosted mode without any data leaving the system. This includes:
+Create a production-ready Docker deployment setup for Mentra Notes that is:
+- Easy to deploy on any server with Docker
+- Self-contained with all dependencies (MongoDB, app, optional llama.cpp)
+- Configurable for different environments (dev, staging, production)
+- Supports both Cloudflare Tunnel and direct HTTPS (via reverse proxy)
+- Includes persistent storage for data
 
-1. **Code audit** - Review what data is collected/stored and where it goes
-2. **Network analysis** - Verify no unexpected external API calls
-3. **Data flow documentation** - Document what stays local vs. what could leave the system
-4. **Configuration review** - Ensure no telemetry/analytics are enabled
-5. **Dependency cleanup** - Remove unused cloud provider SDKs and evaluate third-party dependencies
+**Target:** Single `docker compose up` command to start the entire stack.
 
 # 2. CONTEXT SUMMARY
 
-## Current Dependencies (from package.json)
+## Current Infrastructure
 
-### Cloud Provider SDKs (candidates for removal):
-- `@anthropic-ai/sdk` - Anthropic Claude API client
-- `@aws-sdk/client-s3` - AWS S3/R2 client
-- `@google/genai` - Google Gemini API client
-- `openai` - OpenAI API client
+### Existing Docker Setup:
+- **Dev Container** (`.devcontainer/Dockerfile`): NVIDIA CUDA-based, includes cloudflared, Node.js, Bun
+- **Production Dockerfile** (`docker/Dockerfile`): Bun-based, lightweight
+- **Porter Config** (`porter.yaml`): Cloud deployment config (not needed for self-hosted)
 
-### Other Dependencies to Evaluate:
-- `@mentra/sdk` - MentraOS SDK (required for glasses integration)
-- `@mentra/react` - MentraOS React components
-- `posthog-js` - Analytics/telemetry (⚠️ HIGH PRIORITY)
-- `resend` - Email service
-- `mongoose` - MongoDB client (local DB is fine)
+### Current Manual Setup:
+1. MongoDB running in separate Docker container:
+   ```bash
+   docker run --name mongodb-ainotes \
+     -e MONGO_INITDB_ROOT_USERNAME=admin \
+     -e MONGO_INITDB_ROOT_PASSWORD=phil217 \
+     -e MONGO_INITDB_DATABASE=ainotes \
+     -p 27017:27017 \
+     -d mongo --bind_ip_all
+   ```
 
-## Key Files to Audit:
-- `src/index.ts` - Main entry point, server setup
-- `src/backend/services/llm/` - LLM provider implementations
-- `src/backend/services/storage/` - Storage implementations
-- `src/backend/services/*.service.ts` - Various service files
-- `src/frontend/` - Frontend code (check for tracking)
-- `package.json` - Dependencies
+2. App running in VS Code dev container with:
+   - Cloudflare tunnel for HTTPS: `cloudflared tunnel run --token <token>`
+   - Port forwarding: 27017 (MongoDB), 30000 (llama.cpp)
 
-## Data Types in the Application:
-- **Transcriptions** - Speech-to-text from glasses
-- **Conversations** - Detected conversation segments
-- **Notes** - AI-generated or manual notes
-- **Photos** - Images captured from glasses
-- **User settings** - Preferences and configuration
+3. llama.cpp server (external, on network at 192.168.1.185:30000)
+
+### Key Configuration (from env.example):
+- `MONGODB_URI` - MongoDB connection string
+- `AGENT_PROVIDER` - LLM provider (llamacpp, ollama, gemini, etc.)
+- `LLAMACPP_BASE_URL` - llama.cpp server URL
+- `STORAGE_PROVIDER` - local or r2
+- `LOCAL_STORAGE_PATH` - Local file storage path
+- `HOST` - Server binding (0.0.0.0 for Docker)
+- `PORT` - Server port (default 3000)
+
+## Deployment Goals:
+1. **Single docker-compose.yml** for entire stack
+2. **Persistent volumes** for MongoDB and local storage
+3. **Optional services** (llama.cpp can be external)
+4. **Easy configuration** via .env file
+5. **HTTPS support** via Cloudflare Tunnel or Caddy reverse proxy
+6. **Production-ready** with proper logging and restart policies
 
 # 3. APPROACH OVERVIEW
 
-## Audit Strategy
+## Architecture
 
-### Phase 1: Dependency Analysis
-1. Identify all npm packages that could send data externally
-2. Determine which are required vs. optional
-3. Create a removal plan for unused cloud SDKs
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Docker Compose Stack                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────┐ │
+│  │  Cloudflare │    │   Caddy     │    │     (Alternative)   │ │
+│  │   Tunnel    │ OR │  (Reverse   │    │   Direct Port       │ │
+│  │  (HTTPS)    │    │   Proxy)    │    │   Exposure          │ │
+│  └──────┬──────┘    └──────┬──────┘    └──────────┬──────────┘ │
+│         │                  │                       │            │
+│         └──────────────────┼───────────────────────┘            │
+│                            ▼                                    │
+│                  ┌─────────────────┐                            │
+│                  │   Mentra Notes  │                            │
+│                  │   (Bun Server)  │                            │
+│                  │   Port 3000     │                            │
+│                  └────────┬────────┘                            │
+│                           │                                     │
+│              ┌────────────┼────────────┐                        │
+│              ▼            ▼            ▼                        │
+│    ┌─────────────┐ ┌───────────┐ ┌──────────────┐              │
+│    │  MongoDB    │ │  Local    │ │  llama.cpp   │              │
+│    │  (Data)     │ │  Storage  │ │  (Optional)  │              │
+│    │  Port 27017 │ │  Volume   │ │  Port 8080   │              │
+│    └─────────────┘ └───────────┘ └──────────────┘              │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 
-### Phase 2: Code Audit
-1. Search for external API calls (fetch, axios, SDK clients)
-2. Search for telemetry/analytics code
-3. Review environment variable usage
-4. Check for hardcoded URLs or API endpoints
+External (optional):
+┌─────────────────┐
+│  llama.cpp or   │
+│  Ollama Server  │
+│  (192.168.x.x)  │
+└─────────────────┘
+```
 
-### Phase 3: Data Flow Mapping
-1. Trace data from input (glasses) to storage
-2. Document all external touchpoints
-3. Identify configuration switches for local-only mode
+## Deployment Profiles
 
-### Phase 4: Cleanup Implementation
-1. Remove unused dependencies
-2. Add configuration guards for optional cloud features
-3. Update documentation
+### Profile 1: Minimal (App + MongoDB)
+- Mentra Notes app
+- MongoDB
+- Uses external llama.cpp/Ollama
+- HTTPS via Cloudflare Tunnel
+
+### Profile 2: Full Local (App + MongoDB + llama.cpp)
+- Everything self-contained
+- Includes llama.cpp server with CUDA support
+- Good for air-gapped environments
+
+### Profile 3: Development
+- Hot reload enabled
+- Mounted source code
+- Debug ports exposed
+
+## File Structure
+```
+deploy/
+├── docker-compose.yml          # Main production compose file
+├── docker-compose.dev.yml      # Development overrides
+├── docker-compose.llm.yml      # Optional llama.cpp service
+├── .env.example                # Environment template
+├── Dockerfile                  # Production app image
+├── Dockerfile.llm              # llama.cpp with CUDA (optional)
+├── scripts/
+│   ├── setup.sh               # Initial setup script
+│   ├── backup.sh              # Backup script
+│   └── restore.sh             # Restore script
+└── README.md                  # Deployment documentation
+```
 
 # 4. IMPLEMENTATION STEPS
 
-## Step 1: Audit PostHog Analytics
-**Goal:** Identify and evaluate PostHog telemetry integration.
+## Step 1: Create Deploy Directory Structure
+**Goal:** Set up the deployment directory with all necessary files.
 
-**FINDINGS (from preliminary audit):**
+**Create:** `deploy/` directory in repo root
 
-PostHog is actively used in 8 files:
-- `src/frontend/services/posthog/client.ts` - **HARDCODED API KEY!**
-- `src/frontend/services/posthog/events.ts` - Event tracking
-- `src/frontend/services/posthog/features.ts` - Feature flags
-- `src/frontend/services/posthog/index.ts` - Exports
-- `src/frontend/lib/posthog.ts` - Additional utilities
-- `src/frontend/App.tsx` - Integration
-- `src/frontend/pages/onboarding/OnboardingPage.tsx` - Usage
-- `src/backend/api/router.ts` - Backend proxy
-
-**Critical issue in `client.ts`:**
-```typescript
-PostHog.init("phc_QuuFFRBKtdPDMsA96Yw608iwmcOe5UtZcHOzpTbSF0y", {
-  api_host: "/api/posthog",
-  ui_host: "https://us.posthog.com",
-  persistence: "memory",
-});
+**Files to create:**
+```
+deploy/
+├── docker-compose.yml
+├── docker-compose.dev.yml
+├── docker-compose.tunnel.yml
+├── .env.example
+├── Dockerfile
+├── scripts/
+│   ├── setup.sh
+│   ├── start.sh
+│   ├── stop.sh
+│   ├── backup.sh
+│   └── logs.sh
+└── README.md
 ```
 
-**Action required:**
-1. Remove hardcoded PostHog API key
-2. Make PostHog completely optional via `DISABLE_ANALYTICS=true`
-3. Guard all PostHog imports with feature flag
-4. Consider removing `posthog-js` from package.json entirely for privacy-focused fork
-
 ---
 
-## Step 2: Audit MentraOS SDK
-**Goal:** Understand what data the MentraOS SDK sends/receives.
+## Step 2: Create Production Dockerfile
+**Goal:** Optimized Dockerfile for production deployment.
 
-**FINDINGS (from preliminary audit):**
+**File:** `deploy/Dockerfile`
 
-MentraOS SDK is used in:
-- `src/backend/NotesApp.ts` - Main app class extends `AppServer`
-- `src/index.ts` - Creates auth routes via `createMentraAuthRoutes`
-- Various session managers - Access glasses data
+```dockerfile
+# Build stage
+FROM oven/bun:1 AS builder
 
-**Key usage in `NotesApp.ts`:**
-```typescript
-import { AppServer, AppSession } from "@mentra/sdk";
-// App extends AppServer for glasses integration
+WORKDIR /app
+
+# Copy package files
+COPY package.json bun.lock* ./
+COPY packages/display-utils/package.json packages/display-utils/tsconfig.json ./packages/display-utils/
+COPY packages/display-utils/src ./packages/display-utils/src
+
+# Install dependencies
+RUN bun install --frozen-lockfile
+
+# Build display-utils
+WORKDIR /app/packages/display-utils
+RUN bunx tsc -p tsconfig.json
+
+WORKDIR /app
+RUN bun install
+
+# Copy source code
+COPY . .
+
+# Production stage
+FROM oven/bun:1-slim
+
+WORKDIR /app
+
+# Copy built application
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages ./packages
+COPY --from=builder /app/src ./src
+COPY --from=builder /app/package.json ./
+
+# Create data directory
+RUN mkdir -p /app/data/storage
+
+# Set environment
+ENV NODE_ENV=production
+ENV HOST=0.0.0.0
+ENV PORT=3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:3000/api/health || exit 1
+
+EXPOSE 3000
+
+CMD ["bun", "run", "start"]
 ```
 
-**Key usage in `index.ts`:**
-```typescript
-import { createMentraAuthRoutes } from "@mentra/sdk";
-// Creates routes for /api/mentra/auth/*
+---
+
+## Step 3: Create Main Docker Compose File
+**Goal:** Production docker-compose with all services.
+
+**File:** `deploy/docker-compose.yml`
+
+```yaml
+version: '3.8'
+
+services:
+  # ===========================================
+  # Mentra Notes Application
+  # ===========================================
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: mentra-notes-app
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - HOST=0.0.0.0
+      - PORT=3000
+      - MONGODB_URI=mongodb://${MONGO_USER:-admin}:${MONGO_PASSWORD:-changeme}@mongodb:27017/${MONGO_DB:-ainotes}?authSource=admin
+      - PACKAGE_NAME=${PACKAGE_NAME}
+      - MENTRAOS_API_KEY=${MENTRAOS_API_KEY}
+      - COOKIE_SECRET=${COOKIE_SECRET}
+      - AGENT_PROVIDER=${AGENT_PROVIDER:-llamacpp}
+      - LLAMACPP_BASE_URL=${LLAMACPP_BASE_URL:-http://host.docker.internal:8080}
+      - LLAMACPP_MODEL=${LLAMACPP_MODEL:-local-model}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - STORAGE_PROVIDER=${STORAGE_PROVIDER:-local}
+      - LOCAL_STORAGE_PATH=/app/data/storage
+      - LOCAL_ONLY_MODE=${LOCAL_ONLY_MODE:-true}
+      - ENABLE_ANALYTICS=${ENABLE_ANALYTICS:-false}
+    volumes:
+      - app-storage:/app/data/storage
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - mentra-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ===========================================
+  # MongoDB Database
+  # ===========================================
+  mongodb:
+    image: mongo:7
+    container_name: mentra-notes-mongodb
+    restart: unless-stopped
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_USER:-admin}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD:-changeme}
+      - MONGO_INITDB_DATABASE=${MONGO_DB:-ainotes}
+    volumes:
+      - mongodb-data:/data/db
+      - mongodb-config:/data/configdb
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - mentra-network
+
+volumes:
+  mongodb-data:
+    driver: local
+  mongodb-config:
+    driver: local
+  app-storage:
+    driver: local
+
+networks:
+  mentra-network:
+    driver: bridge
 ```
 
-**Assessment:**
-- **Required** for glasses communication and user authentication
-- Cannot be removed if glasses integration is needed
-- Need to document what data flows through this SDK
-- For fully offline use: would need to investigate if SDK can work without cloud auth
-
-**Action:**
-1. Document data flow through MentraOS SDK
-2. Investigate if offline/local auth mode exists
-3. Add to PRIVACY.md as required external dependency
-
 ---
 
-## Step 3: Audit LLM Provider Code
-**Goal:** Verify cloud LLM providers are only used when explicitly configured.
+## Step 4: Create Cloudflare Tunnel Compose Override
+**Goal:** Add Cloudflare Tunnel for HTTPS access.
 
-**Files:**
-- `src/backend/services/llm/anthropic.ts`
-- `src/backend/services/llm/gemini.ts`
-- `src/backend/services/llm/openai.ts`
-- `src/backend/services/llm/ollama.ts`
-- `src/backend/services/llm/llamacpp.ts`
-- `src/backend/services/llm/index.ts`
+**File:** `deploy/docker-compose.tunnel.yml`
 
-**Verify:**
-- Cloud providers only instantiated when API keys are present
-- No fallback to cloud when local is configured
-- No API calls unless explicitly selected
+```yaml
+version: '3.8'
 
----
-
-## Step 4: Audit Storage Services
-**Goal:** Verify R2/S3 is only used when configured.
-
-**Files:**
-- `src/backend/services/storage/r2.ts`
-- `src/backend/services/storage/local.ts`
-- `src/backend/services/storage/index.ts`
-- `src/backend/services/r2*.service.ts`
-
-**Verify:**
-- R2 only used when credentials are present
-- Local storage works without any cloud config
-- No fallback to cloud storage
-
----
-
-## Step 5: Audit Email Service (Resend)
-**Goal:** Identify email functionality and make it optional.
-
-**FINDINGS (from preliminary audit):**
-
-**File:** `src/backend/services/resend.service.ts`
-
-**Current behavior:**
-```typescript
-const resend = new Resend(process.env.RESEND_API_KEY);
-if (!process.env.RESEND_API_KEY) {
-  console.warn("[Resend] RESEND_API_KEY not set — email sending will fail");
-}
+services:
+  # ===========================================
+  # Cloudflare Tunnel (for HTTPS)
+  # ===========================================
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: mentra-notes-tunnel
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - app
+    networks:
+      - mentra-network
 ```
 
-**Assessment:**
-- Resend client is initialized at module load (even without API key)
-- Sends emails from `notes@mentra.glass`
-- Used for sharing notes/transcripts via email
-- **Not required** for core functionality
-
-**Action:**
-1. Make Resend import lazy (only when API key is present)
-2. Add `DISABLE_EMAIL=true` configuration option
-3. Gracefully skip email features when disabled
-4. Consider removing from package.json for privacy-focused fork
-
----
-
-## Step 6: Audit Frontend for External Calls
-**Goal:** Check frontend code for analytics, tracking, or external API calls.
-
-**Search patterns:**
+**Usage:**
 ```bash
-grep -r "fetch(" src/frontend/
-grep -r "analytics" src/frontend/
-grep -r "posthog" src/frontend/
-grep -r "gtag" src/frontend/
-grep -r "google" src/frontend/
-grep -r "facebook" src/frontend/
-grep -r "pixel" src/frontend/
+# Start with Cloudflare Tunnel
+docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d
 ```
 
-**Check:**
-- No hardcoded external URLs
-- No third-party tracking scripts
-- No external font/CDN loading
-
 ---
 
-## Step 7: Audit Environment Variables
-**Goal:** Document all environment variables and their privacy implications.
+## Step 5: Create Development Compose Override
+**Goal:** Development configuration with hot reload.
 
-**Files:**
-- `env.example`
-- All `.ts` files using `process.env`
+**File:** `deploy/docker-compose.dev.yml`
 
-**Create documentation table:**
-| Variable | Required | Privacy Impact | Notes |
-|----------|----------|----------------|-------|
-| MONGODB_URI | Optional | Local DB | Safe |
-| GEMINI_API_KEY | Optional | Sends data to Google | Cloud only |
-| ... | ... | ... | ... |
+```yaml
+version: '3.8'
 
----
-
-## Step 8: Remove Unused Cloud Dependencies
-**Goal:** Remove cloud provider SDKs that aren't needed for local operation.
-
-**File:** `package.json`
-
-**Dependencies to evaluate for removal:**
-
-1. **`@anthropic-ai/sdk`** - Only needed if using Anthropic
-   - Check if code guards against import when not configured
-   - Consider: Keep but make optional, or remove entirely
-
-2. **`@google/genai`** - Only needed if using Gemini
-   - Same evaluation as above
-
-3. **`openai`** - Only needed if using OpenAI
-   - Same evaluation as above
-
-4. **`@aws-sdk/client-s3`** - Only needed for R2 storage
-   - Check if local storage works without it
-   - Consider: Keep but make optional
-
-5. **`resend`** - Only needed for email features
-   - Evaluate if email is essential
-   - Consider: Keep but make optional
-
-6. **`posthog-js`** - Analytics
-   - **REMOVE** or make completely optional with clear disable flag
-
-**Approach options:**
-
-**Option A: Lazy Loading (Recommended)**
-Keep dependencies in package.json but only import when needed:
-```typescript
-// Only import when actually using Anthropic
-if (provider === "anthropic") {
-  const { Anthropic } = await import("@anthropic-ai/sdk");
-  // use it
-}
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.dev
+    container_name: mentra-notes-dev
+    environment:
+      - NODE_ENV=development
+    volumes:
+      # Mount source for hot reload
+      - ../src:/app/src:cached
+      - ../packages:/app/packages:cached
+      - app-storage:/app/data/storage
+    ports:
+      - "${PORT:-3000}:3000"
+    command: ["bun", "--hot", "src/index.ts"]
 ```
 
-**Option B: Complete Removal**
-Remove from package.json and delete provider files:
-- Delete `src/backend/services/llm/anthropic.ts`
-- Delete `src/backend/services/llm/gemini.ts`
-- Delete `src/backend/services/llm/openai.ts`
-- Update `src/backend/services/llm/index.ts`
+**File:** `deploy/Dockerfile.dev`
+
+```dockerfile
+FROM oven/bun:1
+
+WORKDIR /app
+
+# Install dependencies
+COPY package.json bun.lock* ./
+COPY packages/display-utils/package.json packages/display-utils/tsconfig.json ./packages/display-utils/
+COPY packages/display-utils/src ./packages/display-utils/src
+
+RUN bun install
+
+# Build display-utils
+WORKDIR /app/packages/display-utils
+RUN bunx tsc -p tsconfig.json
+
+WORKDIR /app
+RUN bun install
+
+# Copy source (will be overwritten by volume mount)
+COPY . .
+
+# Create data directory
+RUN mkdir -p /app/data/storage
+
+ENV NODE_ENV=development
+ENV HOST=0.0.0.0
+ENV PORT=3000
+
+EXPOSE 3000
+
+CMD ["bun", "--hot", "src/index.ts"]
+```
 
 ---
 
-## Step 9: Create Privacy Configuration
-**Goal:** Add clear configuration for privacy-focused deployment.
+## Step 6: Create Environment Template
+**Goal:** Provide easy-to-configure environment file.
 
-**File:** `env.example` (update)
+**File:** `deploy/.env.example`
 
-**Add section:**
 ```bash
 # =============================================================================
-# Privacy Configuration
+# Mentra Notes - Docker Deployment Configuration
+# =============================================================================
+# Copy this file to .env and fill in your values:
+#   cp .env.example .env
 # =============================================================================
 
-# Disable all analytics/telemetry (default: true for self-hosted)
-DISABLE_ANALYTICS=true
+# -----------------------------------------------------------------------------
+# Required Settings
+# -----------------------------------------------------------------------------
 
-# Disable email features
-DISABLE_EMAIL=true
+# MentraOS Integration (get from console.mentra.glass)
+PACKAGE_NAME=com.yourname.notes
+MENTRAOS_API_KEY=your_api_key_here
 
-# Force local-only mode (prevents any cloud provider usage)
-LOCAL_ONLY_MODE=true
-```
+# Security
+COOKIE_SECRET=generate_a_random_string_here
 
-**File:** `src/index.ts` (update)
+# -----------------------------------------------------------------------------
+# MongoDB Settings
+# -----------------------------------------------------------------------------
 
-**Add startup checks:**
-```typescript
-const isLocalOnly = process.env.LOCAL_ONLY_MODE === "true";
-const analyticsDisabled = process.env.DISABLE_ANALYTICS !== "false"; // Default disabled
+MONGO_USER=admin
+MONGO_PASSWORD=changeme_to_secure_password
+MONGO_DB=ainotes
+MONGO_PORT=27017
 
-if (isLocalOnly) {
-  // Verify no cloud services are configured
-  if (process.env.GEMINI_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY) {
-    console.warn("⚠️  LOCAL_ONLY_MODE is set but cloud API keys are configured. Cloud APIs will NOT be used.");
-  }
-}
+# -----------------------------------------------------------------------------
+# AI Provider Settings
+# -----------------------------------------------------------------------------
 
-console.log(`   • Privacy Mode: ${isLocalOnly ? "✅ Local Only" : "⚠️  Cloud services may be used if configured"}`);
-console.log(`   • Analytics:    ${analyticsDisabled ? "✅ Disabled" : "⚠️  Enabled"}`);
-```
-
----
-
-## Step 10: Update LLM Index for Local-Only Mode
-**Goal:** Enforce local-only mode in LLM provider selection.
-
-**File:** `src/backend/services/llm/index.ts`
-
-**Changes:**
-```typescript
-export function getProviderFromEnv(): ProviderName {
-  const isLocalOnly = process.env.LOCAL_ONLY_MODE === "true";
-  const envProvider = process.env.AGENT_PROVIDER?.toLowerCase();
-  
-  // In local-only mode, only allow ollama or llamacpp
-  if (isLocalOnly) {
-    if (envProvider === "ollama") return "ollama";
-    if (envProvider === "llamacpp" || envProvider === "llama") return "llamacpp";
-    
-    // Default to llamacpp in local-only mode
-    console.warn("[LLM] LOCAL_ONLY_MODE: Defaulting to llamacpp provider");
-    return "llamacpp";
-  }
-  
-  // Normal provider selection
-  if (envProvider === "anthropic" || envProvider === "claude") return "anthropic";
-  if (envProvider === "openai") return "openai";
-  if (envProvider === "ollama") return "ollama";
-  if (envProvider === "llamacpp" || envProvider === "llama") return "llamacpp";
-  
-  return "gemini"; // Default
-}
-```
-
----
-
-## Step 11: Create Data Flow Documentation
-**Goal:** Document all data flows for transparency.
-
-**File:** `PRIVACY.md` (new file in repo root)
-
-**Content outline:**
-```markdown
-# Privacy & Data Flow Documentation
-
-## Overview
-Mentra Notes can operate in fully local mode with no data leaving your infrastructure.
-
-## Data Types
-
-### Transcriptions
-- **Source:** MentraOS glasses (microphone)
-- **Processing:** Speech-to-text on glasses, text sent to app
-- **Storage:** MongoDB (local) + Local filesystem (archived)
-- **External sharing:** None in local mode
-
-### AI Processing
-- **Local mode:** Ollama or llama.cpp (all processing on your hardware)
-- **Cloud mode:** Gemini/Anthropic/OpenAI (data sent to provider)
-
-### Photos
-- **Source:** MentraOS glasses (camera)
-- **Storage:** Local filesystem
-- **External sharing:** None in local mode
-
-## Configuration for Maximum Privacy
-
-\`\`\`bash
-LOCAL_ONLY_MODE=true
-DISABLE_ANALYTICS=true
-DISABLE_EMAIL=true
+# Provider: llamacpp, ollama, gemini, anthropic, openai
 AGENT_PROVIDER=llamacpp
+
+# llama.cpp settings (if using llamacpp)
+# Use host.docker.internal for services on host machine
+# Or use actual IP/hostname for remote servers
+LLAMACPP_BASE_URL=http://host.docker.internal:8080
+LLAMACPP_MODEL=local-model
+
+# Ollama settings (if using ollama)
+# OLLAMA_BASE_URL=http://host.docker.internal:11434
+# OLLAMA_MODEL_FAST=llama3.1
+# OLLAMA_MODEL_SMART=llama3.1:70b
+
+# -----------------------------------------------------------------------------
+# Storage Settings
+# -----------------------------------------------------------------------------
+
+# Storage provider: local (recommended) or r2
 STORAGE_PROVIDER=local
-\`\`\`
 
-## Network Connections
+# Local storage is mounted at /app/data/storage inside container
+# This is persisted via Docker volume
 
-| Destination | Purpose | Required | Can Disable |
-|-------------|---------|----------|-------------|
-| MongoDB (local) | Data storage | Yes | N/A (local) |
-| llama.cpp server | AI processing | Yes (for AI) | Use local server |
-| MentraOS | Glasses auth | Yes | No |
+# -----------------------------------------------------------------------------
+# Privacy Settings
+# -----------------------------------------------------------------------------
 
-## Dependencies & Data Sharing
+# Disable cloud services (recommended for self-hosted)
+LOCAL_ONLY_MODE=true
 
-[Table of all npm packages and their data implications]
+# Disable analytics/telemetry
+ENABLE_ANALYTICS=false
+
+# -----------------------------------------------------------------------------
+# Network Settings
+# -----------------------------------------------------------------------------
+
+# App port (exposed on host)
+PORT=3000
+
+# Cloudflare Tunnel (optional, for HTTPS)
+# Get token from Cloudflare Zero Trust dashboard
+# CLOUDFLARE_TUNNEL_TOKEN=your_tunnel_token_here
+
+# -----------------------------------------------------------------------------
+# Optional: Cloud Services (only if LOCAL_ONLY_MODE=false)
+# -----------------------------------------------------------------------------
+
+# Gemini API
+# GEMINI_API_KEY=your_gemini_api_key
+
+# Anthropic API
+# ANTHROPIC_API_KEY=your_anthropic_api_key
+
+# OpenAI API
+# OPENAI_API_KEY=your_openai_api_key
+
+# Email (Resend)
+# RESEND_API_KEY=your_resend_api_key
 ```
 
 ---
 
-## Step 12: Disable PostHog Analytics
-**Goal:** Completely disable PostHog or make it opt-in only.
+## Step 7: Create Setup Script
+**Goal:** One-command initial setup.
 
-**Find PostHog initialization and wrap with config check:**
+**File:** `deploy/scripts/setup.sh`
 
-```typescript
-// Before
-import posthog from 'posthog-js';
-posthog.init('key', { ... });
+```bash
+#!/bin/bash
+set -e
 
-// After
-const analyticsEnabled = process.env.DISABLE_ANALYTICS !== "true" && 
-                         process.env.POSTHOG_KEY;
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOY_DIR="$(dirname "$SCRIPT_DIR")"
 
-if (analyticsEnabled) {
-  const posthog = await import('posthog-js');
-  posthog.default.init(process.env.POSTHOG_KEY, { ... });
-}
+echo "========================================"
+echo "  Mentra Notes - Setup Script"
+echo "========================================"
+echo ""
+
+# Check Docker
+if ! command -v docker &> /dev/null; then
+    echo "❌ Docker is not installed. Please install Docker first."
+    exit 1
+fi
+
+if ! command -v docker compose &> /dev/null; then
+    echo "❌ Docker Compose is not installed. Please install Docker Compose first."
+    exit 1
+fi
+
+echo "✅ Docker and Docker Compose are installed"
+echo ""
+
+# Check/create .env file
+if [ ! -f "$DEPLOY_DIR/.env" ]; then
+    echo "📝 Creating .env file from template..."
+    cp "$DEPLOY_DIR/.env.example" "$DEPLOY_DIR/.env"
+    echo ""
+    echo "⚠️  IMPORTANT: Edit $DEPLOY_DIR/.env with your configuration"
+    echo "   Required fields:"
+    echo "   - PACKAGE_NAME"
+    echo "   - MENTRAOS_API_KEY"
+    echo "   - COOKIE_SECRET"
+    echo "   - MONGO_PASSWORD (change from default!)"
+    echo ""
+    read -p "Press Enter after editing .env to continue..."
+fi
+
+# Load environment
+source "$DEPLOY_DIR/.env"
+
+# Validate required vars
+if [ -z "$PACKAGE_NAME" ] || [ "$PACKAGE_NAME" = "com.yourname.notes" ]; then
+    echo "❌ Please set PACKAGE_NAME in .env"
+    exit 1
+fi
+
+if [ -z "$MENTRAOS_API_KEY" ] || [ "$MENTRAOS_API_KEY" = "your_api_key_here" ]; then
+    echo "❌ Please set MENTRAOS_API_KEY in .env"
+    exit 1
+fi
+
+echo "✅ Configuration validated"
+echo ""
+
+# Build and start
+echo "🏗️  Building Docker images..."
+cd "$DEPLOY_DIR"
+docker compose build
+
+echo ""
+echo "🚀 Starting services..."
+docker compose up -d
+
+echo ""
+echo "⏳ Waiting for services to be healthy..."
+sleep 10
+
+# Check health
+if docker compose ps | grep -q "healthy"; then
+    echo ""
+    echo "========================================"
+    echo "  ✅ Mentra Notes is running!"
+    echo "========================================"
+    echo ""
+    echo "  Access the app at: http://localhost:${PORT:-3000}"
+    echo ""
+    echo "  Useful commands:"
+    echo "    View logs:    ./scripts/logs.sh"
+    echo "    Stop:         ./scripts/stop.sh"
+    echo "    Backup:       ./scripts/backup.sh"
+    echo ""
+else
+    echo "⚠️  Services may still be starting. Check logs with: ./scripts/logs.sh"
+fi
 ```
 
-**Or remove entirely from package.json if not needed.**
+---
+
+## Step 8: Create Helper Scripts
+**Goal:** Convenient management scripts.
+
+**File:** `deploy/scripts/start.sh`
+
+```bash
+#!/bin/bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOY_DIR="$(dirname "$SCRIPT_DIR")"
+
+cd "$DEPLOY_DIR"
+
+# Check for tunnel flag
+if [ "$1" = "--tunnel" ] || [ "$1" = "-t" ]; then
+    echo "🚀 Starting with Cloudflare Tunnel..."
+    docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d
+else
+    echo "🚀 Starting Mentra Notes..."
+    docker compose up -d
+fi
+
+echo "✅ Services started. View logs with: ./scripts/logs.sh"
+```
+
+**File:** `deploy/scripts/stop.sh`
+
+```bash
+#!/bin/bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOY_DIR="$(dirname "$SCRIPT_DIR")"
+
+cd "$DEPLOY_DIR"
+
+echo "🛑 Stopping Mentra Notes..."
+docker compose down
+
+echo "✅ Services stopped"
+```
+
+**File:** `deploy/scripts/logs.sh`
+
+```bash
+#!/bin/bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOY_DIR="$(dirname "$SCRIPT_DIR")"
+
+cd "$DEPLOY_DIR"
+
+# Default to app logs, or specify service
+SERVICE="${1:-app}"
+
+docker compose logs -f "$SERVICE"
+```
+
+**File:** `deploy/scripts/backup.sh`
+
+```bash
+#!/bin/bash
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOY_DIR="$(dirname "$SCRIPT_DIR")"
+BACKUP_DIR="${BACKUP_DIR:-$DEPLOY_DIR/backups}"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+
+mkdir -p "$BACKUP_DIR"
+
+echo "📦 Creating backup..."
+
+# Backup MongoDB
+echo "  - Backing up MongoDB..."
+docker compose -f "$DEPLOY_DIR/docker-compose.yml" exec -T mongodb \
+    mongodump --archive --gzip --authenticationDatabase admin \
+    -u "${MONGO_USER:-admin}" -p "${MONGO_PASSWORD:-changeme}" \
+    > "$BACKUP_DIR/mongodb_$TIMESTAMP.archive.gz"
+
+# Backup app storage
+echo "  - Backing up app storage..."
+docker compose -f "$DEPLOY_DIR/docker-compose.yml" exec -T app \
+    tar czf - /app/data/storage \
+    > "$BACKUP_DIR/storage_$TIMESTAMP.tar.gz"
+
+# Backup .env (without secrets exposed in filename)
+echo "  - Backing up configuration..."
+cp "$DEPLOY_DIR/.env" "$BACKUP_DIR/env_$TIMESTAMP.backup"
+
+echo ""
+echo "✅ Backup completed!"
+echo "   Location: $BACKUP_DIR"
+echo "   Files:"
+ls -lh "$BACKUP_DIR"/*_$TIMESTAMP* 2>/dev/null || echo "   (no files found)"
+```
+
+---
+
+## Step 9: Create Deployment Documentation
+**Goal:** Comprehensive deployment guide.
+
+**File:** `deploy/README.md`
+
+```markdown
+# Mentra Notes - Docker Deployment
+
+Self-hosted deployment of Mentra Notes with MongoDB and optional Cloudflare Tunnel.
+
+## Quick Start
+
+```bash
+# 1. Clone and enter deploy directory
+cd deploy
+
+# 2. Run setup (creates .env, builds, starts)
+./scripts/setup.sh
+
+# 3. Access at http://localhost:3000
+```
+
+## Requirements
+
+- Docker 20.10+
+- Docker Compose 2.0+
+- 2GB RAM minimum
+- llama.cpp or Ollama server (for AI features)
+
+## Configuration
+
+Copy `.env.example` to `.env` and configure:
+
+### Required Settings
+| Variable | Description |
+|----------|-------------|
+| `PACKAGE_NAME` | Your MentraOS package name |
+| `MENTRAOS_API_KEY` | API key from console.mentra.glass |
+| `COOKIE_SECRET` | Random secret for session cookies |
+| `MONGO_PASSWORD` | MongoDB password (change default!) |
+
+### AI Provider
+| Variable | Description |
+|----------|-------------|
+| `AGENT_PROVIDER` | `llamacpp` or `ollama` (default: llamacpp) |
+| `LLAMACPP_BASE_URL` | URL to llama.cpp server |
+| `OLLAMA_BASE_URL` | URL to Ollama server |
+
+## Commands
+
+```bash
+# Start services
+./scripts/start.sh
+
+# Start with Cloudflare Tunnel (HTTPS)
+./scripts/start.sh --tunnel
+
+# Stop services
+./scripts/stop.sh
+
+# View logs
+./scripts/logs.sh          # App logs
+./scripts/logs.sh mongodb  # MongoDB logs
+
+# Create backup
+./scripts/backup.sh
+```
+
+## Architecture
+
+```
+┌─────────────────┐     ┌─────────────────┐
+│  Cloudflare     │────▶│  Mentra Notes   │
+│  Tunnel (HTTPS) │     │  (Port 3000)    │
+└─────────────────┘     └────────┬────────┘
+                                 │
+                    ┌────────────┼────────────┐
+                    ▼            ▼            ▼
+          ┌─────────────┐ ┌───────────┐ ┌──────────┐
+          │  MongoDB    │ │  Storage  │ │ llama.cpp│
+          │  (27017)    │ │  Volume   │ │ (ext.)   │
+          └─────────────┘ └───────────┘ └──────────┘
+```
+
+## Volumes
+
+| Volume | Purpose |
+|--------|---------|
+| `mongodb-data` | MongoDB database files |
+| `mongodb-config` | MongoDB configuration |
+| `app-storage` | Transcript archives, photos |
+
+## Connecting to External llama.cpp
+
+If llama.cpp runs on your host machine:
+```bash
+LLAMACPP_BASE_URL=http://host.docker.internal:8080
+```
+
+If llama.cpp runs on another server:
+```bash
+LLAMACPP_BASE_URL=http://192.168.1.185:30000
+```
+
+## Troubleshooting
+
+### App can't connect to MongoDB
+```bash
+# Check MongoDB is healthy
+docker compose ps
+
+# Check MongoDB logs
+./scripts/logs.sh mongodb
+```
+
+### App can't connect to llama.cpp
+```bash
+# Verify llama.cpp is accessible from container
+docker compose exec app curl http://host.docker.internal:8080/health
+```
+
+## Updating
+
+```bash
+# Pull latest code
+git pull
+
+# Rebuild and restart
+docker compose build
+docker compose up -d
+```
+```
+
+---
+
+## Step 10: Add Git Branch and Initial Files
+**Goal:** Create deployment branch with all files.
+
+**Commands:**
+```bash
+# Create new branch
+git checkout -b deploy/docker-production
+
+# Create deploy directory
+mkdir -p deploy/scripts
+
+# Create all files as specified above
+# ... (files created in previous steps)
+
+# Make scripts executable
+chmod +x deploy/scripts/*.sh
+
+# Commit
+git add deploy/
+git commit -m "feat: Add Docker production deployment setup
+
+- docker-compose.yml for app + MongoDB
+- docker-compose.tunnel.yml for Cloudflare Tunnel
+- docker-compose.dev.yml for development
+- Helper scripts (setup, start, stop, backup, logs)
+- Comprehensive documentation"
+
+# Push
+git push -u origin deploy/docker-production
+```
 
 # 5. TESTING AND VALIDATION
 
-## Privacy Verification Tests
+## Deployment Tests
 
-### Test 1: Network Traffic Analysis
-1. Start the app with `LOCAL_ONLY_MODE=true`
-2. Use browser DevTools Network tab or Wireshark
-3. Perform typical operations (transcribe, generate notes, etc.)
-4. Verify NO external requests except:
-   - MongoDB (should be localhost)
-   - llama.cpp/Ollama (should be local network)
-   - MentraOS (required for glasses - document what's sent)
+### Test 1: Fresh Deployment
+```bash
+# Clean environment test
+cd deploy
+rm -f .env
+./scripts/setup.sh
+```
+**Expected:** Setup prompts for .env configuration, then builds and starts.
 
-### Test 2: Dependency Import Check
-1. Remove cloud API keys from `.env`
-2. Start the app
-3. Verify no errors about missing Anthropic/Gemini/OpenAI
-4. Verify app works with only Ollama/llama.cpp
+### Test 2: Service Health Checks
+```bash
+# All services should be healthy
+docker compose ps
+```
+**Expected:** All services show "healthy" status.
 
-### Test 3: Analytics Disabled
-1. Set `DISABLE_ANALYTICS=true`
-2. Check browser Network tab for PostHog requests
-3. Verify zero analytics requests
+### Test 3: App Connectivity
+```bash
+# Test health endpoint
+curl http://localhost:3000/api/health
+```
+**Expected:** Returns 200 OK with health status.
 
-### Test 4: Local Storage Only
-1. Remove all R2/S3 credentials
-2. Set `STORAGE_PROVIDER=local`
-3. Use the app, trigger end-of-day batch
-4. Verify files appear in `./data/storage/`
-5. Verify no S3/R2 connection attempts
+### Test 4: MongoDB Connection
+```bash
+# Test MongoDB from app container
+docker compose exec app curl -s "http://localhost:3000/api/health" | grep -i mongo
+```
+**Expected:** MongoDB connection status is "connected".
 
-### Test 5: Email Disabled
-1. Set `DISABLE_EMAIL=true` or remove Resend API key
-2. Trigger any email functionality
-3. Verify graceful handling (no errors, feature just disabled)
+### Test 5: External llama.cpp Connection
+```bash
+# With llama.cpp running on 192.168.1.185:30000
+# Update .env: LLAMACPP_BASE_URL=http://192.168.1.185:30000
+docker compose restart app
+docker compose exec app curl http://192.168.1.185:30000/health
+```
+**Expected:** llama.cpp responds with health status.
+
+### Test 6: Cloudflare Tunnel
+```bash
+# Start with tunnel
+./scripts/start.sh --tunnel
+
+# Check tunnel status
+docker compose logs cloudflared
+```
+**Expected:** Tunnel connects and routes traffic to app.
+
+### Test 7: Data Persistence
+```bash
+# Stop and restart
+./scripts/stop.sh
+./scripts/start.sh
+
+# Verify data still exists
+docker compose exec mongodb mongosh --eval "db.getSiblingDB('ainotes').getCollectionNames()"
+```
+**Expected:** Collections and data persist across restarts.
+
+### Test 8: Backup and Restore
+```bash
+# Create backup
+./scripts/backup.sh
+
+# Verify backup files exist
+ls -la backups/
+```
+**Expected:** Backup files created for MongoDB and storage.
 
 ## Verification Checklist
 
-### Code Audit
-- [ ] All external API calls identified and documented
-- [ ] PostHog usage found and made optional
-- [ ] MentraOS SDK data flow documented
-- [ ] No hardcoded external URLs
-- [ ] No tracking pixels or external scripts
-
-### Dependency Cleanup
-- [ ] Unused cloud SDKs removed or made lazy-load
-- [ ] `posthog-js` removed or disabled by default
-- [ ] `resend` made optional
-- [ ] All remaining dependencies justified
+### Docker Setup
+- [ ] `deploy/` directory created with all files
+- [ ] `docker-compose.yml` starts app + MongoDB
+- [ ] `docker-compose.tunnel.yml` adds Cloudflare Tunnel
+- [ ] `docker-compose.dev.yml` enables hot reload
+- [ ] All scripts are executable
 
 ### Configuration
-- [ ] `LOCAL_ONLY_MODE` implemented and tested
-- [ ] `DISABLE_ANALYTICS` implemented and tested
-- [ ] `DISABLE_EMAIL` implemented and tested
-- [ ] Privacy startup messages added
+- [ ] `.env.example` has all required variables documented
+- [ ] Default values work for minimal setup
+- [ ] MongoDB credentials are configurable
+- [ ] External llama.cpp URL is configurable
+
+### Networking
+- [ ] App binds to 0.0.0.0 inside container
+- [ ] MongoDB accessible from app container
+- [ ] `host.docker.internal` works for host services
+- [ ] External IPs work for remote llama.cpp
+
+### Persistence
+- [ ] MongoDB data persists in named volume
+- [ ] App storage persists in named volume
+- [ ] Volumes survive container recreation
 
 ### Documentation
-- [ ] `PRIVACY.md` created with full data flow docs
-- [ ] `env.example` updated with privacy options
-- [ ] All environment variables documented with privacy impact
+- [ ] `deploy/README.md` covers all use cases
+- [ ] Quick start works for new users
+- [ ] Troubleshooting section covers common issues
+- [ ] Environment variables fully documented

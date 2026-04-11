@@ -20,6 +20,13 @@ import type {
 
 const DEFAULT_BASE_URL = "http://localhost:11434";
 
+// Default timeout: 15 minutes (local models can be slow, especially on CPU)
+// At 3-4 tokens/sec with 4096 max tokens = ~17-22 minutes worst case
+const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
+
+// Allow override via environment variable
+const LLM_TIMEOUT_MS = parseInt(process.env.LLM_TIMEOUT_MS || "", 10) || DEFAULT_TIMEOUT_MS;
+
 const DEFAULT_MODELS: ModelConfig = {
   fast: "llama3.1",
   smart: "llama3.1:70b",
@@ -224,6 +231,7 @@ export class OllamaProvider implements AgentProvider {
       method: "POST",
       headers,
       body: JSON.stringify(request),
+      signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
     });
 
     if (!response.ok) {
@@ -279,6 +287,7 @@ export class OllamaProvider implements AgentProvider {
       method: "POST",
       headers,
       body: JSON.stringify(request),
+      signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
     });
 
     if (!response.ok) {

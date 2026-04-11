@@ -1,0 +1,8 @@
+# Environment file (contains secrets)
+.env
+
+# Backup files
+backups/
+
+# Local testing
+*.log

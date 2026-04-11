@@ -1,0 +1,35 @@
+# =============================================================================
+# Mentra Notes - Cloudflare Tunnel Overlay
+# =============================================================================
+# Adds Cloudflare Tunnel for secure HTTPS access without port forwarding.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d
+#
+# Prerequisites:
+#   1. Create a tunnel at https://one.dash.cloudflare.com/
+#   2. Get the tunnel token
+#   3. Set CLOUDFLARE_TUNNEL_TOKEN in your .env file
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # Cloudflare Tunnel
+  # ===========================================================================
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: mentra-tunnel
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - app
+    networks:
+      - mentra-network
+
+  # ===========================================================================
+  # App Override - Don't expose port when using tunnel
+  # ===========================================================================
+  app:
+    ports: []  # Remove direct port exposure when using tunnel

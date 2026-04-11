@@ -1,0 +1,36 @@
+# =============================================================================
+# Mentra Notes - Development Overlay
+# =============================================================================
+# Development overrides with hot reload and source mounting.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# This mounts your source code and enables Bun's hot module replacement.
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # App Override - Development Mode
+  # ===========================================================================
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: builder  # Use builder stage with all dev dependencies
+    environment:
+      - NODE_ENV=development
+    volumes:
+      # Mount source code for hot reload
+      - ../src:/app/src:ro
+      - ../packages:/app/packages:ro
+      # Named volume for storage (persists across restarts)
+      - app-storage:/app/data/storage
+    command: ["bun", "run", "--hot", "src/index.ts"]
+
+  # ===========================================================================
+  # MongoDB Override - Expose port for debugging
+  # ===========================================================================
+  mongodb:
+    ports:
+      - "27017:27017"
