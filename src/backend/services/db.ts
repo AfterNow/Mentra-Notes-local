@@ -28,12 +28,15 @@ export async function connectDB(): Promise<void> {
   }
 
   try {
+    // 15 minutes timeout - allows for slow MongoDB startup in Docker
+    const timeoutMS = 15 * 60 * 1000; // 15 minutes
+    
     await mongoose.connect(uri, {
       dbName: "notes",
       tlsAllowInvalidCertificates: true,
       tlsAllowInvalidHostnames: true,
-      serverSelectionTimeoutMS: 5000, // Fail fast if can't connect
-      connectTimeoutMS: 5000,
+      serverSelectionTimeoutMS: timeoutMS,
+      connectTimeoutMS: timeoutMS,
     });
     isConnected = true;
     console.log("[DB] ✅ Connected to MongoDB");
