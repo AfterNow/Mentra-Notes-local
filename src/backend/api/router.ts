@@ -1263,11 +1263,18 @@ api.get("/search", authMiddleware, async (c) => {
 
 // =============================================================================
 // PostHog Reverse Proxy (bypasses ad blockers)
+// DISABLED BY DEFAULT - only works when ENABLE_ANALYTICS=true
 // =============================================================================
 
 const POSTHOG_HOST = "https://us.i.posthog.com";
+const isAnalyticsEnabled = process.env.ENABLE_ANALYTICS === "true";
 
 api.all("/posthog/*", async (c) => {
+  // Return 204 No Content when analytics is disabled
+  if (!isAnalyticsEnabled) {
+    return c.body(null, 204);
+  }
+
   const path = c.req.path.replace(/^\/api\/posthog/, "");
   const url = new URL(path || "/", POSTHOG_HOST);
 

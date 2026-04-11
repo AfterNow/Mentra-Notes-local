@@ -50,6 +50,10 @@ const hasCloudLLM = hasGemini || hasAnthropic || hasOpenAI;
 const hasAI = hasLocalLLM || hasCloudLLM;
 const hasMongoDB = !!process.env.MONGODB_URI;
 
+// Privacy settings
+const isLocalOnlyMode = process.env.LOCAL_ONLY_MODE === "true";
+const isAnalyticsEnabled = process.env.ENABLE_ANALYTICS === "true";
+
 function getAIProviderStatus(): string {
   if (hasOllama) {
     const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
@@ -86,6 +90,10 @@ function getStorageStatus(): string {
 console.log("🚀 Starting Notes - All-day transcription app\n");
 console.log(`   Package: ${PACKAGE_NAME}`);
 console.log(`   Host: ${HOST}:${PORT}`);
+console.log("");
+console.log("   Privacy:");
+console.log(`   • Local-only mode: ${isLocalOnlyMode ? "✅ Enabled (no cloud services)" : "⚠️  Disabled (cloud services may be used)"}`);
+console.log(`   • Analytics:       ${isAnalyticsEnabled ? "⚠️  Enabled (PostHog)" : "✅ Disabled"}`);
 console.log("");
 console.log("   Integrations:");
 console.log(`   • AI Provider: ${getAIProviderStatus()}`);
