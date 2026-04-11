@@ -1,0 +1,109 @@
+# =============================================================================
+# Mentra Notes - Docker Compose Configuration
+# =============================================================================
+# Production deployment with MongoDB
+#
+# Usage:
+#   docker compose up -d              # Start all services
+#   docker compose logs -f app        # View app logs
+#   docker compose down               # Stop all services
+#
+# For Cloudflare Tunnel:
+#   docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # Mentra Notes Application
+  # ===========================================================================
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: mentra-notes
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      # Server
+      - NODE_ENV=production
+      - HOST=0.0.0.0
+      - PORT=3000
+      
+      # MentraOS (required)
+      - PACKAGE_NAME=${PACKAGE_NAME}
+      - MENTRAOS_API_KEY=${MENTRAOS_API_KEY}
+      - COOKIE_SECRET=${COOKIE_SECRET}
+      
+      # MongoDB
+      - MONGODB_URI=mongodb://${MONGO_USER:-admin}:${MONGO_PASSWORD:-changeme}@mongodb:27017/${MONGO_DB:-ainotes}?authSource=admin
+      
+      # AI Provider
+      - AGENT_PROVIDER=${AGENT_PROVIDER:-llamacpp}
+      - LLAMACPP_BASE_URL=${LLAMACPP_BASE_URL:-http://host.docker.internal:8080}
+      - LLAMACPP_MODEL=${LLAMACPP_MODEL:-local-model}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL_FAST=${OLLAMA_MODEL_FAST:-llama3.1}
+      - OLLAMA_MODEL_SMART=${OLLAMA_MODEL_SMART:-llama3.1:70b}
+      
+      # Storage
+      - STORAGE_PROVIDER=${STORAGE_PROVIDER:-local}
+      - LOCAL_STORAGE_PATH=/app/data/storage
+      
+      # Privacy (disabled by default)
+      - LOCAL_ONLY_MODE=${LOCAL_ONLY_MODE:-false}
+      - ENABLE_ANALYTICS=${ENABLE_ANALYTICS:-false}
+    volumes:
+      - app-storage:/app/data/storage
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - mentra-network
+    # Allow connecting to host network services (llama.cpp, ollama)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ===========================================================================
+  # MongoDB Database
+  # ===========================================================================
+  mongodb:
+    image: mongo:7
+    container_name: mentra-mongodb
+    restart: unless-stopped
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_USER:-admin}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD:-changeme}
+      - MONGO_INITDB_DATABASE=${MONGO_DB:-ainotes}
+    volumes:
+      - mongodb-data:/data/db
+      - mongodb-config:/data/configdb
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - mentra-network
+    # Uncomment to expose MongoDB port externally (for debugging)
+    # ports:
+    #   - "27017:27017"
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  mentra-network:
+    driver: bridge
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  mongodb-data:
+    name: mentra-mongodb-data
+  mongodb-config:
+    name: mentra-mongodb-config
+  app-storage:
+    name: mentra-app-storage
